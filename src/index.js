@@ -20,7 +20,7 @@ bot.on('message', async (msg) => {
 // Polling errors handler
 bot.on('polling_error', (error) => {
   logger.error('Polling error:', error)
-  
+
   if (error.code === 'ECONNRESET' || error.code === 'ECONNREFUSED') {
     logger.info('Connection error, attempting to restart polling...')
     setTimeout(() => {
