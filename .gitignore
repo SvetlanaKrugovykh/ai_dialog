@@ -1,0 +1,17 @@
+keys
+data
+path
+node_modules
+temp
+.env*
+.vscode
+.idea
+.eslint*
+assets
+users
+logs
+*.xml
+*.exe
+*.log
+*.config
+locaThread.log
