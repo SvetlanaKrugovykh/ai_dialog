@@ -67,7 +67,9 @@ class LocalAIService {
 
       return transcribedText
     } catch (error) {
-      logger.error('Speech-to-text service error:', error)
+      if (process.env.DEBUG_LEVEL !== 'info') {
+        logger.error('Speech-to-text service error:', error)
+      }
       if (error.code === 'ECONNREFUSED') {
         throw new Error('Speech-to-text service is not available. Please try again later.')
       }
@@ -104,7 +106,9 @@ class LocalAIService {
 
       return processedResult
     } catch (error) {
-      logger.error('Text processing service error:', error)
+      if (process.env.DEBUG_LEVEL !== 'info') {
+        logger.error('Text processing service error:', error)
+      }
       if (error.code === 'ECONNREFUSED') {
         throw new Error('Text processing service is not available. Please try again later.')
       }
@@ -205,7 +209,9 @@ class LocalAIService {
 
       return { transcribedText, rawResponse: response.data }
     } catch (error) {
-      logger.error('Speech-to-text service error:', error)
+      if (process.env.DEBUG_LEVEL !== 'info') {
+        logger.error('Speech-to-text service error:', error)
+      }
       if (error.code === 'ECONNREFUSED') {
         throw new Error('Speech-to-text service is not available. Please try again later.')
       }
@@ -226,7 +232,9 @@ class LocalAIService {
     try {
       return await this.processText(text, clientId)
     } catch (error) {
-      logger.error('Text message processing error:', error)
+      if (process.env.DEBUG_LEVEL !== 'info') {
+        logger.error('Text message processing error:', error)
+      }
       throw error
     }
   }
