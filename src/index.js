@@ -4,10 +4,8 @@ const sessionService = require('./services/session')
 const logger = require('./utils/logger')
 require('dotenv').config()
 
-// Bot initialization
 logger.info('🤖 AI Dialog Bot starting...')
 
-// Incoming messages handler
 bot.on('message', async (msg) => {
   try {
     await messageHandler.handleMessage(bot, msg)
@@ -17,7 +15,6 @@ bot.on('message', async (msg) => {
   }
 })
 
-// Polling errors handler
 bot.on('polling_error', (error) => {
   logger.error('Polling error:', error)
 
@@ -31,12 +28,10 @@ bot.on('polling_error', (error) => {
   }
 })
 
-// Periodic cleanup of inactive sessions (every 30 minutes)
 setInterval(() => {
   sessionService.cleanupInactiveSessions()
 }, 30 * 60 * 1000)
 
-// Process termination handler
 process.on('SIGINT', () => {
   logger.info('🛑 Bot stopping gracefully...')
   bot.stopPolling()
@@ -50,7 +45,6 @@ process.on('SIGINT', () => {
     })
 })
 
-// Unhandled exceptions handler
 process.on('unhandledRejection', (reason, promise) => {
   logger.error('Unhandled Rejection at:', promise, 'reason:', reason)
 })

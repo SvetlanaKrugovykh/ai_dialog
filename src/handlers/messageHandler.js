@@ -1,6 +1,9 @@
+const localAIService = require('../services/localAI')
 const chatGPTService = require('../services/chatgpt')
 const sessionService = require('../services/session')
 const logger = require('../utils/logger')
+const fs = require('fs')
+const path = require('path')
 
 class MessageHandler {
   constructor() {
@@ -8,7 +11,16 @@ class MessageHandler {
       '/start': this.handleStart.bind(this),
       '/help': this.handleHelp.bind(this),
       '/clear': this.handleClear.bind(this),
-      '/stats': this.handleStats.bind(this)
+      '/stats': this.handleStats.bind(this),
+      '/health': this.handleHealth.bind(this)
+    }
+    this.tempDir = path.join(__dirname, '../../temp')
+    this.ensureTempDir()
+  }
+
+  ensureTempDir() {
+    if (!fs.existsSync(this.tempDir)) {
+      fs.mkdirSync(this.tempDir, { recursive: true })
     }
   }
 
@@ -21,25 +33,31 @@ class MessageHandler {
     try {
       const chatId = msg.chat.id
       const userId = msg.from.id.toString()
-      const messageText = msg.text
-
-      logger.info(`Received message from user ${userId}: ${messageText}`)
+      
+      logger.info(`Received message from user ${userId}, type: ${msg.voice ? 'voice' : 'text'}`)
 
       // Check if message is a command
-      if (messageText.startsWith('/')) {
+      if (msg.text && msg.text.startsWith('/')) {
         await this.handleCommand(bot, msg)
         return
       }
 
       const session = sessionService.getSession(userId)
-
-      // If user is waiting for answer
-      if (session.state === 'waiting_for_answer') {
-        await this.handleUserAnswer(bot, msg)
-      } else {
-        // Process as new question
-        await this.handleUserQuestion(bot, msg)
+      
+      // Handle voice messages
+      if (msg.voice) {
+        await this.handleVoiceMessage(bot, msg)
+        return
       }
+
+      // Handle text messages
+      if (msg.text) {
+        await this.handleTextMessage(bot, msg)
+        return
+      }
+
+      // Unsupported message type
+      await bot.sendMessage(chatId, 'Please send a text or voice message.')
 
     } catch (error) {
       logger.error('Error handling message:', error)
@@ -75,20 +93,21 @@ class MessageHandler {
     const welcomeMessage = `
 🤖 Welcome to AI Dialog Bot!
 
-This bot will help you in Q&A mode using ChatGPT.
+This bot processes voice and text messages using local AI services.
 
 How it works:
-• Ask me any question
-• Get an answer from ChatGPT
-• Optionally, give your own answer to the same question
-• I will analyze and supplement your answer
+• Send a voice message or text
+• Local AI will transcribe and process it
+• Get intelligent response back
+• If local AI can't handle it, ChatGPT will help
 
 Commands:
 /help - show help
 /clear - clear history
 /stats - show statistics
+/health - check AI services status
 
-Ask your first question! 🚀
+Send your first message! 🎤�
     `
 
     await bot.sendMessage(chatId, welcomeMessage)
@@ -106,17 +125,168 @@ Ask your first question! 🚀
 /help - show this help
 /clear - clear conversation history
 /stats - show bot statistics
+/health - check AI services status
 
 💡 How to use:
-1. Ask a question
-2. Get an answer from ChatGPT
-3. Optional: give your answer to the same question
-4. Get analysis and supplements to your answer
+1. Send a voice message (preferred) or text
+2. Local AI will process your message
+3. Get intelligent response
+4. Continue the conversation!
 
-Just write your question and I'll answer! 🤗
+🎤 Voice messages are automatically transcribed and processed
+📝 Text messages are processed directly
     `
 
     await bot.sendMessage(msg.chat.id, helpMessage)
+  }
+
+  /**
+   * Handle /health command
+   */
+  async handleHealth(bot, msg) {
+    try {
+      const servicesStatus = await localAIService.checkServicesHealth()
+      
+      const statusMessage = `
+🔧 AI Services Status:
+
+🎤 Speech-to-Text: ${servicesStatus.speechToText ? '✅ Online' : '❌ Offline'}
+🧠 Text Processing: ${servicesStatus.textProcessing ? '✅ Online' : '❌ Offline'}
+🤖 ChatGPT Fallback: ${process.env.OPENAI_API_KEY ? '✅ Available' : '❌ Not configured'}
+
+${!servicesStatus.speechToText || !servicesStatus.textProcessing ? 
+  '\n⚠️ Some local services are offline. ChatGPT fallback may be used.' : 
+  '\n✅ All local services are running normally!'}
+      `
+
+      await bot.sendMessage(msg.chat.id, statusMessage)
+    } catch (error) {
+      logger.error('Error checking services health:', error)
+      await bot.sendMessage(msg.chat.id, 'Error checking services status.')
+    }
+  }
+
+  /**
+   * Handle voice messages
+   */
+  async handleVoiceMessage(bot, msg) {
+    const chatId = msg.chat.id
+    const userId = msg.from.id.toString()
+    const session = sessionService.getSession(userId)
+
+    try {
+      // Show processing indicator
+      await bot.sendChatAction(chatId, 'typing')
+      await bot.sendMessage(chatId, '🎤 Processing voice message...')
+
+      // Download voice file
+      const fileId = msg.voice.file_id
+      const file = await bot.getFile(fileId)
+      const fileUrl = `https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${file.file_path}`
+      
+      // Save voice file temporarily
+      const tempFileName = `voice_${userId}_${Date.now()}.oga`
+      const tempFilePath = path.join(this.tempDir, tempFileName)
+      
+      const response = await require('axios').get(fileUrl, { responseType: 'stream' })
+      const writer = fs.createWriteStream(tempFilePath)
+      response.data.pipe(writer)
+
+      await new Promise((resolve, reject) => {
+        writer.on('finish', resolve)
+        writer.on('error', reject)
+      })
+
+      // Get current message number for this user
+      const segmentNumber = session.conversationHistory.length + 1
+
+      try {
+        // Process voice through local AI
+        const result = await localAIService.processVoiceMessage(tempFilePath, userId, segmentNumber)
+        
+        // Save to history
+        sessionService.addToHistory(userId, 'voice_message', `[Voice message #${segmentNumber}]`)
+        sessionService.addToHistory(userId, 'ai_response', result)
+
+        // Send result to user
+        await bot.sendMessage(chatId, `🧠 AI Response:\n\n${result}`)
+
+      } catch (localError) {
+        logger.warn(`Local AI failed for user ${userId}, trying ChatGPT fallback:`, localError)
+        
+        // Fallback to ChatGPT if local services fail
+        await this.fallbackToChatGPT(bot, msg, '[Voice message - transcription failed]', localError.message)
+      }
+
+      // Clean up temp file
+      fs.unlink(tempFilePath, (err) => {
+        if (err) logger.warn('Failed to delete temp file:', err)
+      })
+
+    } catch (error) {
+      logger.error(`Error processing voice message from user ${userId}:`, error)
+      await bot.sendMessage(chatId, 'Sorry, I couldn\'t process your voice message. Please try again or send a text message.')
+    }
+  }
+
+  /**
+   * Handle text messages
+   */
+  async handleTextMessage(bot, msg) {
+    const chatId = msg.chat.id
+    const userId = msg.from.id.toString()
+    const messageText = msg.text
+
+    try {
+      // Show processing indicator
+      await bot.sendChatAction(chatId, 'typing')
+
+      try {
+        // Process text through local AI
+        const result = await localAIService.processTextMessage(messageText, userId)
+        
+        // Save to history
+        sessionService.addToHistory(userId, 'text_message', messageText)
+        sessionService.addToHistory(userId, 'ai_response', result)
+
+        // Send result to user
+        await bot.sendMessage(chatId, `🧠 AI Response:\n\n${result}`)
+
+      } catch (localError) {
+        logger.warn(`Local AI failed for user ${userId}, trying ChatGPT fallback:`, localError)
+        
+        // Fallback to ChatGPT if local services fail
+        await this.fallbackToChatGPT(bot, msg, messageText, localError.message)
+      }
+
+    } catch (error) {
+      logger.error(`Error processing text message from user ${userId}:`, error)
+      await bot.sendMessage(chatId, 'Sorry, I couldn\'t process your message. Please try again.')
+    }
+  }
+
+  /**
+   * Fallback to ChatGPT when local services fail
+   */
+  async fallbackToChatGPT(bot, msg, originalMessage, localError) {
+    const chatId = msg.chat.id
+    const userId = msg.from.id.toString()
+
+    try {
+      await bot.sendMessage(chatId, `⚠️ Local AI services are unavailable (${localError}). Using ChatGPT fallback...`)
+      
+      // Use ChatGPT as fallback
+      const gptResponse = await chatGPTService.processQuestion(originalMessage, userId)
+      
+      // Save to history
+      sessionService.addToHistory(userId, 'chatgpt_fallback', gptResponse)
+      
+      await bot.sendMessage(chatId, `🤖 ChatGPT Response:\n\n${gptResponse}`)
+
+    } catch (gptError) {
+      logger.error(`ChatGPT fallback also failed for user ${userId}:`, gptError)
+      await bot.sendMessage(chatId, 'Sorry, both local AI and ChatGPT services are currently unavailable. Please try again later.')
+    }
   }
 
   /**
@@ -156,15 +326,14 @@ Just write your question and I'll answer! 🤗
     await bot.sendChatAction(chatId, 'typing')
 
     try {
-      // Get answer from ChatGPT
+
       const gptResponse = await chatGPTService.processQuestion(question, userId)
-      
-      // Save to session and history
+
       sessionService.updateSession(userId, {
         state: 'waiting_for_answer',
         currentQuestion: question
       })
-      
+
       sessionService.addToHistory(userId, 'question', question)
       sessionService.addToHistory(userId, 'gpt_response', gptResponse)
 
@@ -237,9 +406,6 @@ Ask the next question or continue the dialogue! 💬
     }
   }
 
-  /**
-   * Get bot uptime
-   */
   getUptime() {
     const uptime = process.uptime()
     const hours = Math.floor(uptime / 3600)

@@ -1,67 +1,42 @@
-# AI Dialog Bot 🤖
+# AI Dialog Bot
 
-Telegram bot for interactive Q&A with ChatGPT integration.
+Telegram bot with local AI services and ChatGPT fallback.
 
 ## Features
 
-- 🔄 Question-answer mode with ChatGPT
-- 📝 Analysis and enhancement of user answers
-- 💾 User session management
-- 📊 Usage statistics
-- 🔍 Operation logging
+- 🎤 Voice message processing
+- 📝 Text message processing  
+- 🔄 Local AI services integration
+- 🤖 ChatGPT fallback when local services fail
+- 📊 Services health monitoring
 
-## Project Structure
-
-```
-src/
-├── config/bot.js           # Telegram bot configuration
-├── handlers/messageHandler.js  # Message and command handler
-├── services/
-│   ├── chatgpt.js         # ChatGPT API service
-│   └── session.js         # User session management
-├── utils/logger.js        # Logging utility
-└── index.js               # Main application file
-```
-
-## Installation
+## Setup
 
 1. Install dependencies:
+
 ```bash
 npm install
 ```
 
-2. Copy `.env.example` to `.env` and fill in the variables:
-```bash
-cp .env.example .env
+2. Create `.env` file:
+
+```env
+TELEGRAM_BOT_TOKEN=your_bot_token
+SPEECH_TO_TEXT_URL=http://localhost:8338/update/
+TEXT_PROCESSING_URL=http://localhost:8339/process/
+OPENAI_API_KEY=your_openai_key
 ```
 
-3. Configure environment variables in `.env`:
-```
-TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
-OPENAI_API_KEY=your_openai_api_key_here
-```
+3. Run:
 
-## Usage
-
-### Development
-```bash
-npm run dev
-```
-
-### Production
 ```bash
 npm start
 ```
 
-## Bot Commands
+## Commands
 
-- `/start` - Start working with the bot
+- `/start` - Start bot
 - `/help` - Show help
-- `/clear` - Clear conversation history
-- `/stats` - Show statistics
-
-## Requirements
-
-- Node.js >= 16.0.0
-- Telegram Bot Token
-- OpenAI API Key
+- `/clear` - Clear history
+- `/stats` - Show stats
+- `/health` - Check AI services status

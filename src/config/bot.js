@@ -9,13 +9,9 @@ if (!token) {
 
 const bot = new TelegramBot(token, { polling: true })
 
-// Bot configuration settings
 const botConfig = {
-  // Maximum message length for Telegram
   maxMessageLength: 4096,
-  // Timeout for ChatGPT requests
   chatGptTimeout: 30000,
-  // Maximum number of message sending retries
   maxRetries: 3
 }
 
