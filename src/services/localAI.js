@@ -88,6 +88,8 @@ class LocalAIService {
    */
   async processText(text, clientId) {
     try {
+      return 'under construction )' //TODO: Implement actual text processing logic here
+
       logger.info(`Processing text for client ${clientId}: ${text}`)
 
       const response = await axios.post(this.textProcessingUrl, {
