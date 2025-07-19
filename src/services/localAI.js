@@ -37,7 +37,32 @@ class LocalAIService {
         maxBodyLength: Infinity
       })
 
-      const transcribedText = response.data.text || response.data.transcription || response.data
+      // Handle different response formats
+      let transcribedText
+      if (typeof response.data === 'string') {
+        // Try to parse JSON string first
+        try {
+          const parsedData = JSON.parse(response.data)
+          transcribedText = parsedData.translated_text ||
+            parsedData.text ||
+            parsedData.transcription ||
+            parsedData.result ||
+            parsedData.transcript ||
+            response.data
+        } catch (parseError) {
+          transcribedText = response.data
+        }
+      } else if (response.data && typeof response.data === 'object') {
+        transcribedText = response.data.translated_text ||
+          response.data.text ||
+          response.data.transcription ||
+          response.data.result ||
+          response.data.transcript ||
+          JSON.stringify(response.data)
+      } else {
+        transcribedText = String(response.data)
+      }
+
       logger.info(`Speech-to-text result for client ${clientId}: ${transcribedText}`)
 
       return transcribedText
@@ -95,20 +120,99 @@ class LocalAIService {
    * @param {string} voiceFilePath - path to voice file
    * @param {string} clientId - telegram user id
    * @param {number} segmentNumber - message number in dialog
+   * @param {Object} bot - telegram bot instance (optional, for debug)
+   * @param {string} chatId - telegram chat id (optional, for debug)
    * @returns {Promise<string>} - final processed result
    */
-  async processVoiceMessage(voiceFilePath, clientId, segmentNumber) {
+  async processVoiceMessage(voiceFilePath, clientId, segmentNumber, bot = null, chatId = null) {
     try {
       // Step 1: Convert voice to text
-      const transcribedText = await this.speechToText(voiceFilePath, clientId, segmentNumber)
-      
+      const { transcribedText, rawResponse } = await this.speechToTextWithDebug(voiceFilePath, clientId, segmentNumber)
+
+      if (process.env.DEBUG_LEVEL === 'info' && bot && chatId) {
+        try {
+          await bot.sendMessage(chatId, `🔍 Debug - Raw response:\n\`\`\`json\n${JSON.stringify(rawResponse, null, 2)}\n\`\`\`\n\n📝 Extracted text:\n"${transcribedText}"`, { parse_mode: 'Markdown' })
+          logger.info(`Debug: Sent transcription to chat ${chatId}`)
+        } catch (debugError) {
+          logger.warn('Failed to send debug transcription message:', debugError)
+          // Fallback without markdown if parsing fails
+          try {
+            await bot.sendMessage(chatId, `🔍 Debug - Transcription result:\n\n"${transcribedText}"`)
+          } catch (fallbackError) {
+            logger.error('Failed to send fallback debug message:', fallbackError)
+          }
+        }
+      }
+
       // Step 2: Process the text
       const processedResult = await this.processText(transcribedText, clientId)
-      
+
       return processedResult
     } catch (error) {
       logger.error('Voice processing pipeline error:', error)
       throw error
+    }
+  }
+
+  /**
+   * Helper method for speech to text with debug info
+   */
+  async speechToTextWithDebug(voiceFilePath, clientId, segmentNumber) {
+    try {
+      logger.info(`Converting speech to text for client ${clientId}, segment ${segmentNumber}`)
+
+      const formData = new FormData()
+      formData.append('clientId', clientId)
+      formData.append('segment_number', segmentNumber.toString())
+      formData.append('file', fs.createReadStream(voiceFilePath))
+
+      const response = await axios.post(this.speechToTextUrl, formData, {
+        headers: {
+          ...formData.getHeaders(),
+        },
+        timeout: this.speechTimeout,
+        maxContentLength: Infinity,
+        maxBodyLength: Infinity
+      })
+
+      // Handle different response formats
+      let transcribedText
+      if (typeof response.data === 'string') {
+        // Try to parse JSON string first
+        try {
+          const parsedData = JSON.parse(response.data)
+          transcribedText = parsedData.translated_text ||
+            parsedData.text ||
+            parsedData.transcription ||
+            parsedData.result ||
+            parsedData.transcript ||
+            response.data
+        } catch (parseError) {
+          transcribedText = response.data
+        }
+      } else if (response.data && typeof response.data === 'object') {
+        transcribedText = response.data.translated_text ||
+          response.data.text ||
+          response.data.transcription ||
+          response.data.result ||
+          response.data.transcript ||
+          JSON.stringify(response.data)
+      } else {
+        transcribedText = String(response.data)
+      }
+
+      logger.info(`Speech-to-text result for client ${clientId}: ${transcribedText}`)
+
+      return { transcribedText, rawResponse: response.data }
+    } catch (error) {
+      logger.error('Speech-to-text service error:', error)
+      if (error.code === 'ECONNREFUSED') {
+        throw new Error('Speech-to-text service is not available. Please try again later.')
+      }
+      if (error.code === 'ETIMEDOUT') {
+        throw new Error('Speech-to-text service timeout. Please try with a shorter voice message.')
+      }
+      throw new Error('Failed to convert speech to text. Please try again.')
     }
   }
 

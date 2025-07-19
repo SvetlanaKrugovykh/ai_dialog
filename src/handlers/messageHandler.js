@@ -202,7 +202,7 @@ ${!servicesStatus.speechToText || !servicesStatus.textProcessing ?
 
       try {
         // Process voice through local AI
-        const result = await localAIService.processVoiceMessage(tempFilePath, userId, segmentNumber)
+        const result = await localAIService.processVoiceMessage(tempFilePath, userId, segmentNumber, bot, chatId)
         
         // Save to history
         sessionService.addToHistory(userId, 'voice_message', `[Voice message #${segmentNumber}]`)
