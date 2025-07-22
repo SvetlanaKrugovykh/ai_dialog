@@ -7,7 +7,7 @@ require('dotenv').config()
 class LocalAIService {
   constructor() {
     this.speechToTextUrl = process.env.SPEECH_TO_TEXT_URL || 'http://localhost:8338/update/'
-    this.textProcessingUrl = process.env.TEXT_PROCESSING_URL || 'http://localhost:8339/process/'
+    this.textProcessingUrl = process.env.TEXT_PROCESSING_URL || 'http://localhost:8344/process/'
     this.speechTimeout = parseInt(process.env.SPEECH_TIMEOUT) || 60000 // 60 seconds
     this.textTimeout = parseInt(process.env.TEXT_TIMEOUT) || 30000 // 30 seconds
   }
@@ -88,7 +88,7 @@ class LocalAIService {
    */
   async processText(text, clientId) {
     try {
-      return 'under construction )' //TODO: Implement actual text processing logic here
+      // return 'under construction )' //TODO: Implement actual text processing logic here
 
       logger.info(`Processing text for client ${clientId}: ${text}`)
 
@@ -103,7 +103,30 @@ class LocalAIService {
         timeout: this.textTimeout
       })
 
-      const processedResult = response.data.result || response.data.processed_text || response.data
+      // Handle ticket-based response format
+      let processedResult
+      if (response.data && typeof response.data === 'object') {
+        if (response.data.ticket_id) {
+          // Format ticket information as readable text
+          processedResult = `📋 Ticket Created: ${response.data.ticket_id}\n` +
+            `🏢 Department: ${response.data.department}\n` +
+            `📂 Category: ${response.data.category}\n` +
+            `⚡ Priority: ${response.data.priority}\n` +
+            `📝 Title: ${response.data.title}\n` +
+            `📄 Description: ${response.data.description}\n` +
+            `👤 Requester: ${response.data.requester_info}\n` +
+            `🌐 Language: ${response.data.detected_language} (${response.data.confidence})`
+        } else {
+          // Fallback for other object formats
+          processedResult = response.data.result || 
+            response.data.processed_text || 
+            response.data.text ||
+            JSON.stringify(response.data, null, 2)
+        }
+      } else {
+        processedResult = response.data
+      }
+      
       logger.info(`Text processing result for client ${clientId}: ${processedResult}`)
 
       return processedResult
