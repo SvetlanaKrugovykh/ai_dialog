@@ -2,6 +2,8 @@ const { bot } = require('./config/bot')
 const messageHandler = require('./handlers/messageHandler')
 const sessionService = require('./services/session')
 const logger = require('./utils/logger')
+const messages = require('../data/messages')
+const logMessages = require('../data/logMessages')
 require('dotenv').config()
 
 logger.info('🤖 AI Dialog Bot starting...')
@@ -10,8 +12,8 @@ bot.on('message', async (msg) => {
   try {
     await messageHandler.handleMessage(bot, msg)
   } catch (error) {
-    logger.error('Error in message handler:', error)
-    await bot.sendMessage(msg.chat.id, 'An error occurred. Please try again.')
+    logger.error(logMessages.general.messageHandlingError, error)
+    await bot.sendMessage(msg.chat.id, messages.errors.generalError)
   }
 })
 

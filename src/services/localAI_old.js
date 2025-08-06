@@ -91,7 +91,9 @@ class LocalAIService {
    */
   async processText(text, clientId) {
     try {
-      logger.info(logMessages.processing.textProcessing(clientId, text))
+      // return 'under construction )' //TODO: Implement actual text processing logic here
+
+      logger.info(`Processing text for client ${clientId}: ${text}`)
 
       const response = await axios.post(this.textProcessingUrl, {
         text: text,
@@ -109,7 +111,14 @@ class LocalAIService {
       if (response.data && typeof response.data === 'object') {
         if (response.data.ticket_id) {
           // Format ticket information as readable text
-          processedResult = messages.ticket.created(response.data)
+          processedResult = `📋 Ticket Created: ${response.data.ticket_id}\n` +
+            `🏢 Department: ${response.data.department}\n` +
+            `📂 Category: ${response.data.category}\n` +
+            `⚡ Priority: ${response.data.priority}\n` +
+            `📝 Title: ${response.data.title}\n` +
+            `📄 Description: ${response.data.description}\n` +
+            `👤 Requester: ${response.data.requester_info}\n` +
+            `🌐 Language: ${response.data.detected_language} (${response.data.confidence})`
         } else {
           // Fallback for other object formats
           processedResult = response.data.result || 
@@ -121,20 +130,20 @@ class LocalAIService {
         processedResult = response.data
       }
       
-      logger.info(logMessages.processing.textResult(clientId, processedResult))
+      logger.info(`Text processing result for client ${clientId}: ${processedResult}`)
 
       return processedResult
     } catch (error) {
       if (process.env.DEBUG_LEVEL !== 'info') {
-        logger.error(logMessages.services.textProcessingError, error)
+        logger.error('Text processing service error:', error)
       }
       if (error.code === 'ECONNREFUSED') {
-        throw new Error(serviceErrors.textProcessing.unavailable)
+        throw new Error('Text processing service is not available. Please try again later.')
       }
       if (error.code === 'ETIMEDOUT') {
-        throw new Error(serviceErrors.textProcessing.timeout)
+        throw new Error('Text processing service timeout. Please try again.')
       }
-      throw new Error(serviceErrors.textProcessing.failed)
+      throw new Error('Failed to process text. Please try again.')
     }
   }
 
@@ -154,15 +163,15 @@ class LocalAIService {
 
       if (process.env.DEBUG_LEVEL === 'info' && bot && chatId) {
         try {
-          await bot.sendMessage(chatId, messages.processing.debugTranscription(rawResponse, transcribedText), { parse_mode: 'Markdown' })
-          logger.info(logMessages.debug.transcriptionSent(chatId))
+          await bot.sendMessage(chatId, `🔍 Debug - Raw response:\n\`\`\`json\n${JSON.stringify(rawResponse, null, 2)}\n\`\`\`\n\n📝 Extracted text:\n"${transcribedText}"`, { parse_mode: 'Markdown' })
+          logger.info(`Debug: Sent transcription to chat ${chatId}`)
         } catch (debugError) {
-          logger.warn(logMessages.debug.transcriptionSendFailed, debugError)
+          logger.warn('Failed to send debug transcription message:', debugError)
           // Fallback without markdown if parsing fails
           try {
-            await bot.sendMessage(chatId, messages.processing.debugTranscriptionFallback(transcribedText))
+            await bot.sendMessage(chatId, `🔍 Debug - Transcription result:\n\n"${transcribedText}"`)
           } catch (fallbackError) {
-            logger.error(logMessages.debug.fallbackSendFailed, fallbackError)
+            logger.error('Failed to send fallback debug message:', fallbackError)
           }
         }
       }
@@ -172,7 +181,7 @@ class LocalAIService {
 
       return processedResult
     } catch (error) {
-      logger.error(logMessages.services.voiceProcessingPipelineError, error)
+      logger.error('Voice processing pipeline error:', error)
       throw error
     }
   }
@@ -182,7 +191,7 @@ class LocalAIService {
    */
   async speechToTextWithDebug(voiceFilePath, clientId, segmentNumber) {
     try {
-      logger.info(logMessages.processing.speechToText(clientId, segmentNumber))
+      logger.info(`Converting speech to text for client ${clientId}, segment ${segmentNumber}`)
 
       const formData = new FormData()
       formData.append('clientId', clientId)
@@ -224,20 +233,20 @@ class LocalAIService {
         transcribedText = String(response.data)
       }
 
-      logger.info(logMessages.processing.speechResult(clientId, transcribedText))
+      logger.info(`Speech-to-text result for client ${clientId}: ${transcribedText}`)
 
       return { transcribedText, rawResponse: response.data }
     } catch (error) {
       if (process.env.DEBUG_LEVEL !== 'info') {
-        logger.error(logMessages.services.speechToTextError, error)
+        logger.error('Speech-to-text service error:', error)
       }
       if (error.code === 'ECONNREFUSED') {
-        throw new Error(serviceErrors.speech.unavailable)
+        throw new Error('Speech-to-text service is not available. Please try again later.')
       }
       if (error.code === 'ETIMEDOUT') {
-        throw new Error(serviceErrors.speech.timeout)
+        throw new Error('Speech-to-text service timeout. Please try with a shorter voice message.')
       }
-      throw new Error(serviceErrors.speech.failed)
+      throw new Error('Failed to convert speech to text. Please try again.')
     }
   }
 
@@ -252,7 +261,7 @@ class LocalAIService {
       return await this.processText(text, clientId)
     } catch (error) {
       if (process.env.DEBUG_LEVEL !== 'info') {
-        logger.error(logMessages.services.textMessageProcessingError, error)
+        logger.error('Text message processing error:', error)
       }
       throw error
     }
@@ -272,14 +281,14 @@ class LocalAIService {
       await axios.get(this.speechToTextUrl.replace('/update/', '/health'), { timeout: 5000 })
       status.speechToText = true
     } catch (error) {
-      logger.warn(serviceErrors.health.speechToTextFailed)
+      logger.warn('Speech-to-text service health check failed')
     }
 
     try {
       await axios.get(this.textProcessingUrl.replace('/process/', '/health'), { timeout: 5000 })
       status.textProcessing = true
     } catch (error) {
-      logger.warn(serviceErrors.health.textProcessingFailed)
+      logger.warn('Text processing service health check failed')
     }
 
     return status

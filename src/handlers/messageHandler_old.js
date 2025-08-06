@@ -39,13 +39,7 @@ class MessageHandler {
       
       logger.info(logMessages.messages.received(userId, msg.voice ? 'voice' : 'text'))
 
-      // Check if message is a command - handle authentication in command handlers
-      if (msg.text && msg.text.startsWith('/')) {
-        await this.handleCommand(bot, msg)
-        return
-      }
-
-      // For non-command messages, check authentication here
+      // Check user authentication first
       const authResult = await authService.authorizeUser(userId)
       
       if (!authResult.allowed) {
@@ -54,7 +48,7 @@ class MessageHandler {
         return
       }
       
-      // Send welcome/warning message for first interaction (non-commands only)
+      // Send welcome/warning message for first interaction
       const session = sessionService.getSession(userId)
       if (!session.authenticated) {
         await bot.sendMessage(chatId, authResult.message)
@@ -63,6 +57,12 @@ class MessageHandler {
           session.userInfo = authResult.user
         }
         sessionService.updateSession(userId, session)
+      }
+
+      // Check if message is a command
+      if (msg.text && msg.text.startsWith('/')) {
+        await this.handleCommand(bot, msg)
+        return
       }
       
       // Handle voice messages
@@ -127,10 +127,9 @@ class MessageHandler {
     }
     sessionService.updateSession(userId, session)
     
-    // Send auth message only once
+    // Send auth message first
     await bot.sendMessage(chatId, authResult.message)
     
-    // Then send welcome message
     await bot.sendMessage(chatId, messages.bot.ready)
     logger.info(logMessages.messages.userStarted(userId))
   }
@@ -141,27 +140,33 @@ class MessageHandler {
   async handleHelp(bot, msg) {
     const chatId = msg.chat.id
     const userId = msg.from.id.toString()
-    
-    // Check authentication for help command
-    const authResult = await authService.authorizeUser(userId)
-    
-    if (!authResult.allowed) {
-      await bot.sendMessage(chatId, authResult.message)
-      return
-    }
-    
     const session = sessionService.getSession(userId)
     
     let userInfo = ''
     if (session.userInfo) {
-      userInfo = messages.bot.helpHeader(
-        session.userInfo.firstname, 
-        session.userInfo.lastname, 
-        session.userInfo.email
-      )
+      userInfo = `� Авторизовано: ${session.userInfo.firstname} ${session.userInfo.lastname}\n📧 Email: ${session.userInfo.email}\n\n`
     }
     
-    const helpMessage = userInfo + messages.bot.helpMessage(authService.getMode())
+    const helpMessage = `
+${userInfo}📋 Доступні команди:
+
+/start - почати спочатку
+/help - показати цю допомогу
+/clear - очистити історію розмови
+/stats - показати статистику бота
+/health - перевірити статус AI сервісів
+
+💡 Як користуватися:
+1. Надішліть голосове повідомлення (рекомендовано) або текст
+2. Локальний AI обробить ваше повідомлення
+3. Отримаєте інтелектуальну відповідь
+4. Продовжуйте розмову!
+
+🎤 Голосові повідомлення автоматично розпізнаються та обробляються
+📝 Текстові повідомлення обробляються безпосередньо
+
+� Режим роботи: ${authService.getMode() === 'debug' ? 'НАЛАГОДЖЕННЯ' : 'РОБОЧИЙ'}
+    `
 
     await bot.sendMessage(chatId, helpMessage)
   }
@@ -170,32 +175,25 @@ class MessageHandler {
    * Handle /health command
    */
   async handleHealth(bot, msg) {
-    const chatId = msg.chat.id
-    const userId = msg.from.id.toString()
-    
-    // Check authentication for health command
-    const authResult = await authService.authorizeUser(userId)
-    
-    if (!authResult.allowed) {
-      await bot.sendMessage(chatId, authResult.message)
-      return
-    }
-    
     try {
       const servicesStatus = await localAIService.checkServicesHealth()
-      const allOnline = servicesStatus.speechToText && servicesStatus.textProcessing
       
-      const statusMessage = messages.bot.healthStatus(
-        servicesStatus.speechToText,
-        servicesStatus.textProcessing,
-        !!process.env.OPENAI_API_KEY,
-        allOnline
-      )
+      const statusMessage = `
+🔧 AI Services Status:
 
-      await bot.sendMessage(chatId, statusMessage)
+🎤 Speech-to-Text: ${servicesStatus.speechToText ? '✅ Online' : '❌ Offline'}
+🧠 Text Processing: ${servicesStatus.textProcessing ? '✅ Online' : '❌ Offline'}
+🤖 ChatGPT Fallback: ${process.env.OPENAI_API_KEY ? '✅ Available' : '❌ Not configured'}
+
+${!servicesStatus.speechToText || !servicesStatus.textProcessing ? 
+  '\n⚠️ Some local services are offline. ChatGPT fallback may be used.' : 
+  '\n✅ All local services are running normally!'}
+      `
+
+      await bot.sendMessage(msg.chat.id, statusMessage)
     } catch (error) {
-      logger.error(logMessages.services.healthCheckFailed, error)
-      await bot.sendMessage(chatId, messages.errors.healthCheckError)
+      logger.error('Error checking services health:', error)
+      await bot.sendMessage(msg.chat.id, 'Error checking services status.')
     }
   }
 
@@ -210,7 +208,7 @@ class MessageHandler {
     try {
       // Show processing indicator
       await bot.sendChatAction(chatId, 'typing')
-      await bot.sendMessage(chatId, messages.processing.voiceProcessing)
+      await bot.sendMessage(chatId, '🎤 Processing voice message...')
 
       // Download voice file
       const fileId = msg.voice.file_id
@@ -242,10 +240,10 @@ class MessageHandler {
         sessionService.addToHistory(userId, 'ai_response', result)
 
         // Send result to user
-        await bot.sendMessage(chatId, messages.processing.aiResponse(result))
+        await bot.sendMessage(chatId, `🧠 AI Response:\n\n${result}`)
 
       } catch (localError) {
-        logger.warn(logMessages.processing.localAIFailed(userId, localError))
+        logger.warn(`Local AI failed for user ${userId}, trying ChatGPT fallback:`, localError)
         
         // Fallback to ChatGPT if local services fail
         await this.fallbackToChatGPT(bot, msg, '[Voice message - transcription failed]', localError.message)
@@ -253,12 +251,12 @@ class MessageHandler {
 
       // Clean up temp file
       fs.unlink(tempFilePath, (err) => {
-        if (err) logger.warn(logMessages.files.tempFileDeleteFailed, err)
+        if (err) logger.warn('Failed to delete temp file:', err)
       })
 
     } catch (error) {
-      logger.error(logMessages.processing.voiceProcessingError(userId), error)
-      await bot.sendMessage(chatId, messages.errors.voiceProcessingError)
+      logger.error(`Error processing voice message from user ${userId}:`, error)
+      await bot.sendMessage(chatId, 'Sorry, I couldn\'t process your voice message. Please try again or send a text message.')
     }
   }
 
@@ -283,18 +281,18 @@ class MessageHandler {
         sessionService.addToHistory(userId, 'ai_response', result)
 
         // Send result to user
-        await bot.sendMessage(chatId, messages.processing.aiResponse(result))
+        await bot.sendMessage(chatId, `🧠 AI Response:\n\n${result}`)
 
       } catch (localError) {
-        logger.warn(logMessages.processing.localAIFailed(userId, localError))
+        logger.warn(`Local AI failed for user ${userId}, trying ChatGPT fallback:`, localError)
         
         // Fallback to ChatGPT if local services fail
         await this.fallbackToChatGPT(bot, msg, messageText, localError.message)
       }
 
     } catch (error) {
-      logger.error(logMessages.processing.textProcessingError(userId), error)
-      await bot.sendMessage(chatId, messages.errors.textProcessingError)
+      logger.error(`Error processing text message from user ${userId}:`, error)
+      await bot.sendMessage(chatId, 'Sorry, I couldn\'t process your message. Please try again.')
     }
   }
 
@@ -306,7 +304,7 @@ class MessageHandler {
     const userId = msg.from.id.toString()
 
     try {
-      await bot.sendMessage(chatId, messages.processing.localAIFallback(localError))
+      await bot.sendMessage(chatId, `⚠️ Local AI services are unavailable (${localError}). Using ChatGPT fallback...`)
       
       // Use ChatGPT as fallback
       const gptResponse = await chatGPTService.processQuestion(originalMessage, userId)
@@ -314,11 +312,11 @@ class MessageHandler {
       // Save to history
       sessionService.addToHistory(userId, 'chatgpt_fallback', gptResponse)
       
-      await bot.sendMessage(chatId, messages.processing.chatgptResponse(gptResponse))
+      await bot.sendMessage(chatId, `🤖 ChatGPT Response:\n\n${gptResponse}`)
 
     } catch (gptError) {
-      logger.error(logMessages.processing.chatgptFallbackFailed(userId), gptError)
-      await bot.sendMessage(chatId, messages.errors.servicesUnavailable)
+      logger.error(`ChatGPT fallback also failed for user ${userId}:`, gptError)
+      await bot.sendMessage(chatId, 'Sorry, both local AI and ChatGPT services are currently unavailable. Please try again later.')
     }
   }
 
@@ -326,44 +324,117 @@ class MessageHandler {
    * Handle /clear command
    */
   async handleClear(bot, msg) {
-    const chatId = msg.chat.id
     const userId = msg.from.id.toString()
-    
-    // Check authentication for clear command
-    const authResult = await authService.authorizeUser(userId)
-    
-    if (!authResult.allowed) {
-      await bot.sendMessage(chatId, authResult.message)
-      return
-    }
-    
     sessionService.clearSession(userId)
-    await bot.sendMessage(chatId, messages.success.historyCleared)
+    await bot.sendMessage(msg.chat.id, '✅ Conversation history cleared. You can ask a new question!')
   }
 
   /**
    * Handle /stats command
    */
   async handleStats(bot, msg) {
+    const stats = sessionService.getStats()
+    const statsMessage = `
+📊 Bot statistics:
+
+👥 Total sessions: ${stats.totalSessions}
+🟢 Active sessions: ${stats.activeSessions}
+🕐 Uptime: ${this.getUptime()}
+    `
+
+    await bot.sendMessage(msg.chat.id, statsMessage)
+  }
+
+  /**
+   * Handle user question
+   */
+  async handleUserQuestion(bot, msg) {
     const chatId = msg.chat.id
     const userId = msg.from.id.toString()
-    
-    // Check authentication for stats command
-    const authResult = await authService.authorizeUser(userId)
-    
-    if (!authResult.allowed) {
-      await bot.sendMessage(chatId, authResult.message)
-      return
-    }
-    
-    const stats = sessionService.getStats()
-    const statsMessage = messages.bot.statsMessage(
-      stats.totalSessions,
-      stats.activeSessions,
-      this.getUptime()
-    )
+    const question = msg.text
 
-    await bot.sendMessage(chatId, statsMessage)
+    // Show typing indicator
+    await bot.sendChatAction(chatId, 'typing')
+
+    try {
+
+      const gptResponse = await chatGPTService.processQuestion(question, userId)
+
+      sessionService.updateSession(userId, {
+        state: 'waiting_for_answer',
+        currentQuestion: question
+      })
+
+      sessionService.addToHistory(userId, 'question', question)
+      sessionService.addToHistory(userId, 'gpt_response', gptResponse)
+
+      // Send response with suggestion to give own answer
+      const responseMessage = `
+❓ **Your question:** ${question}
+
+🤖 **ChatGPT answer:**
+${gptResponse}
+
+💭 **Want to give your answer to this question?**
+Just write your answer and I'll analyze and supplement it!
+
+Or ask a new question.
+      `
+
+      await bot.sendMessage(chatId, responseMessage, { parse_mode: 'Markdown' })
+
+    } catch (error) {
+      logger.error(`Error processing question from user ${userId}:`, error)
+      await bot.sendMessage(chatId, 'Sorry, an error occurred while processing your question. Please try again.')
+    }
+  }
+
+  /**
+   * Handle user answer
+   */
+  async handleUserAnswer(bot, msg) {
+    const chatId = msg.chat.id
+    const userId = msg.from.id.toString()
+    const userAnswer = msg.text
+    const session = sessionService.getSession(userId)
+
+    // Show typing indicator
+    await bot.sendChatAction(chatId, 'typing')
+
+    try {
+      // Get answer analysis from ChatGPT
+      const enhancedResponse = await chatGPTService.enhanceAnswer(
+        userAnswer,
+        session.currentQuestion,
+        userId
+      )
+
+      // Save to history
+      sessionService.addToHistory(userId, 'user_answer', userAnswer)
+      sessionService.addToHistory(userId, 'enhanced_response', enhancedResponse)
+
+      // Reset session state
+      sessionService.updateSession(userId, {
+        state: 'idle',
+        currentQuestion: null
+      })
+
+      // Send analysis
+      const analysisMessage = `
+✍️ **Your answer:** ${userAnswer}
+
+🔍 **Analysis and supplements:**
+${enhancedResponse}
+
+Ask the next question or continue the dialogue! 💬
+      `
+
+      await bot.sendMessage(chatId, analysisMessage, { parse_mode: 'Markdown' })
+
+    } catch (error) {
+      logger.error(`Error enhancing answer from user ${userId}:`, error)
+      await bot.sendMessage(chatId, 'Sorry, an error occurred while analyzing your answer. Please try again.')
+    }
   }
 
   getUptime() {

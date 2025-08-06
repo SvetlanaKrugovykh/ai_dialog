@@ -1,6 +1,8 @@
 const axios = require('axios')
 const https = require('https')
 const logger = require('../utils/logger')
+const messages = require('../../data/messages')
+const logMessages = require('../../data/logMessages')
 require('dotenv').config()
 
 class AuthService {
@@ -17,7 +19,7 @@ class AuthService {
    */
   async checkUser(telegramId) {
     try {
-      logger.info(`Checking user authentication for Telegram ID: ${telegramId}`)
+      logger.info(logMessages.auth.checking(telegramId))
 
       const response = await axios.post(this.zammadApiUrl, {
         telegram_id: telegramId
@@ -35,30 +37,38 @@ class AuthService {
       const authResult = response.data
       
       if (authResult.success && authResult.exists && authResult.user) {
-        logger.info(`User authenticated successfully: ${authResult.user.firstname} ${authResult.user.lastname} (${authResult.user.email})`)
+        logger.info(logMessages.auth.success(
+          authResult.user.firstname, 
+          authResult.user.lastname, 
+          authResult.user.email
+        ))
         return {
           authenticated: true,
           user: authResult.user,
-          welcomeMessage: `👋 Привіт, ${authResult.user.firstname} ${authResult.user.lastname}!\n📧 ${authResult.user.email}\n✅ Вас успішно авторизовано в системі.`
+          welcomeMessage: messages.auth.welcome(
+            authResult.user.firstname, 
+            authResult.user.lastname, 
+            authResult.user.email
+          )
         }
       } else if (authResult.success && !authResult.exists) {
-        const message = `❌ Користувач з Telegram ID ${telegramId} не знайден в системі Zammad.`
+        const message = messages.auth.userNotFound(telegramId)
         
         if (this.mode === 'debug') {
-          logger.warn(`User not found in debug mode: ${telegramId}`)
+          logger.warn(logMessages.auth.notFoundDebug(telegramId))
           return {
             authenticated: false,
             blocked: false,
             user: null,
-            warningMessage: `⚠️ РЕЖИМ НАЛАГОДЖЕННЯ\n${message}\nРобота продовжується в тестовому режимі.`
+            warningMessage: messages.auth.debugModeWarning(message)
           }
         } else {
-          logger.warn(`User not found, blocking access: ${telegramId}`)
+          logger.warn(logMessages.auth.notFoundBlocked(telegramId))
           return {
             authenticated: false,
             blocked: true,
             user: null,
-            blockMessage: `🚫 ${message}\nДоступ заборонено. Зверніться до адміністратора.`
+            blockMessage: messages.auth.accessDenied(message)
           }
         }
       } else {
@@ -68,23 +78,23 @@ class AuthService {
     } catch (error) {
       logger.error('Zammad API authentication error:', error)
       
-      const errorMessage = `🔧 Помилка з'єднання з сервісом авторизації.\nСпробуйте пізніше або зверніться до підтримки.`
+      const errorMessage = messages.auth.serviceError
       
       if (this.mode === 'debug') {
-        logger.warn('Authentication service error in debug mode, allowing access')
+        logger.warn(logMessages.auth.serviceErrorDebug)
         return {
           authenticated: false,
           blocked: false,
           user: null,
-          warningMessage: `⚠️ РЕЖИМ НАЛАГОДЖЕННЯ\n${errorMessage}\nРобота продовжується в тестовому режимі.`
+          warningMessage: messages.auth.debugModeWarning(errorMessage)
         }
       } else {
-        logger.error('Authentication service error in production mode, blocking access')
+        logger.error(logMessages.auth.serviceErrorProduction)
         return {
           authenticated: false,
           blocked: true,
           user: null,
-          blockMessage: `🚫 ${errorMessage}`
+          blockMessage: messages.auth.accessDenied(errorMessage)
         }
       }
     }

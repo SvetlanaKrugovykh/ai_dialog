@@ -1,4 +1,5 @@
 const logger = require('../utils/logger')
+const logMessages = require('../../data/logMessages')
 
 class SessionService {
   constructor() {
@@ -23,7 +24,7 @@ class SessionService {
         authenticated: false,
         userInfo: null
       })
-      logger.info(`Created new session for user ${userId}`)
+      logger.info(logMessages.sessions.created(userId))
     }
     
     return this.sessions.get(userId)
@@ -37,7 +38,7 @@ class SessionService {
   updateSession(userId, updates) {
     const session = this.getSession(userId)
     Object.assign(session, updates, { lastActivity: new Date() })
-    logger.debug(`Updated session for user ${userId}`, updates)
+    logger.debug(logMessages.sessions.updated(userId), updates)
   }
 
   /**
