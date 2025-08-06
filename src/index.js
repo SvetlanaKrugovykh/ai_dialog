@@ -10,6 +10,7 @@ logger.info('🤖 AI Dialog Bot starting...')
 
 bot.on('message', async (msg) => {
   try {
+    console.log('DEBUG: Message received:', msg.text || 'voice/other')
     await messageHandler.handleMessage(bot, msg)
   } catch (error) {
     logger.error(logMessages.general.messageHandlingError, error)

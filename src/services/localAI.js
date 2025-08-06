@@ -5,6 +5,7 @@ const logger = require('../utils/logger')
 const messages = require('../../data/messages')
 const logMessages = require('../../data/logMessages')
 const serviceErrors = require('../../data/serviceErrors')
+const ticketParser = require('./ticketParser')
 require('dotenv').config()
 
 class LocalAIService {
@@ -93,6 +94,16 @@ class LocalAIService {
     try {
       logger.info(logMessages.processing.textProcessing(clientId, text))
 
+      // In DEBUG mode, use only local parsing without external AI services
+      if (process.env.MODE === 'debug') {
+        console.log('DEBUG: Using local ticket parser only')
+        const ticket = ticketParser.parseTicket(text, clientId)
+        const formattedTicket = ticketParser.formatTicketForDisplay(ticket)
+        logger.info(logMessages.processing.textResult(clientId, formattedTicket))
+        return formattedTicket
+      }
+
+      // In production mode, use external AI service
       const response = await axios.post(this.textProcessingUrl, {
         text: text,
         clientId: clientId,
@@ -149,6 +160,7 @@ class LocalAIService {
    */
   async processVoiceMessage(voiceFilePath, clientId, segmentNumber, bot = null, chatId = null) {
     try {
+      console.log('DEBUG: processVoiceMessage called for client:', clientId)
       // Step 1: Convert voice to text
       const { transcribedText, rawResponse } = await this.speechToTextWithDebug(voiceFilePath, clientId, segmentNumber)
 
@@ -182,6 +194,7 @@ class LocalAIService {
    */
   async speechToTextWithDebug(voiceFilePath, clientId, segmentNumber) {
     try {
+      console.log('DEBUG: speechToTextWithDebug called for client:', clientId)
       logger.info(logMessages.processing.speechToText(clientId, segmentNumber))
 
       const formData = new FormData()
