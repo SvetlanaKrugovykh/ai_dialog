@@ -1,6 +1,7 @@
 const localAIService = require('../services/localAI')
 const chatGPTService = require('../services/chatgpt')
 const sessionService = require('../services/session')
+const authService = require('../services/auth')
 const logger = require('../utils/logger')
 const fs = require('fs')
 const path = require('path')
@@ -36,13 +37,31 @@ class MessageHandler {
       
       logger.info(`Received message from user ${userId}, type: ${msg.voice ? 'voice' : 'text'}`)
 
+      // Check user authentication first
+      const authResult = await authService.authorizeUser(userId)
+      
+      if (!authResult.allowed) {
+        await bot.sendMessage(chatId, authResult.message)
+        logger.warn(`Access denied for user ${userId}`)
+        return
+      }
+      
+      // Send welcome/warning message for first interaction
+      const session = sessionService.getSession(userId)
+      if (!session.authenticated) {
+        await bot.sendMessage(chatId, authResult.message)
+        session.authenticated = true
+        if (authResult.user) {
+          session.userInfo = authResult.user
+        }
+        sessionService.updateSession(userId, session)
+      }
+
       // Check if message is a command
       if (msg.text && msg.text.startsWith('/')) {
         await this.handleCommand(bot, msg)
         return
       }
-
-      const session = sessionService.getSession(userId)
       
       // Handle voice messages
       if (msg.voice) {
@@ -88,26 +107,45 @@ class MessageHandler {
     const chatId = msg.chat.id
     const userId = msg.from.id.toString()
     
+    // Check user authentication for /start command
+    const authResult = await authService.authorizeUser(userId)
+    
+    if (!authResult.allowed) {
+      await bot.sendMessage(chatId, authResult.message)
+      logger.warn(`Access denied for user ${userId} on /start command`)
+      return
+    }
+    
+    // Clear session and set authentication info
     sessionService.clearSession(userId)
+    const session = sessionService.getSession(userId)
+    session.authenticated = true
+    if (authResult.user) {
+      session.userInfo = authResult.user
+    }
+    sessionService.updateSession(userId, session)
+    
+    // Send auth message first
+    await bot.sendMessage(chatId, authResult.message)
     
     const welcomeMessage = `
-🤖 Welcome to AI Dialog Bot!
+🤖 AI Dialog Bot готовий до роботи!
 
-This bot processes voice and text messages using local AI services.
+Цей бот обробляє голосові та текстові повідомлення за допомогою локальних AI сервісів.
 
-How it works:
-• Send a voice message or text
-• Local AI will transcribe and process it
-• Get intelligent response back
-• If local AI can't handle it, ChatGPT will help
+Як це працює:
+• Надішліть голосове повідомлення або текст
+• Локальний AI розпізнає та обробить його
+• Отримаєте інтелектуальну відповідь
+• Якщо локальний AI не може впоратися, ChatGPT допоможе
 
-Commands:
-/help - show help
-/clear - clear history
-/stats - show statistics
-/health - check AI services status
+Команди:
+/help - показати допомогу
+/clear - очистити історію
+/stats - показати статистику
+/health - перевірити статус AI сервісів
 
-Send your first message! 🎤�
+Надішліть своє перше повідомлення! 🎤📝
     `
 
     await bot.sendMessage(chatId, welcomeMessage)
@@ -118,26 +156,37 @@ Send your first message! 🎤�
    * Handle /help command
    */
   async handleHelp(bot, msg) {
+    const chatId = msg.chat.id
+    const userId = msg.from.id.toString()
+    const session = sessionService.getSession(userId)
+    
+    let userInfo = ''
+    if (session.userInfo) {
+      userInfo = `� Авторизовано: ${session.userInfo.firstname} ${session.userInfo.lastname}\n📧 Email: ${session.userInfo.email}\n\n`
+    }
+    
     const helpMessage = `
-📋 Available commands:
+${userInfo}📋 Доступні команди:
 
-/start - start over
-/help - show this help
-/clear - clear conversation history
-/stats - show bot statistics
-/health - check AI services status
+/start - почати спочатку
+/help - показати цю допомогу
+/clear - очистити історію розмови
+/stats - показати статистику бота
+/health - перевірити статус AI сервісів
 
-💡 How to use:
-1. Send a voice message (preferred) or text
-2. Local AI will process your message
-3. Get intelligent response
-4. Continue the conversation!
+💡 Як користуватися:
+1. Надішліть голосове повідомлення (рекомендовано) або текст
+2. Локальний AI обробить ваше повідомлення
+3. Отримаєте інтелектуальну відповідь
+4. Продовжуйте розмову!
 
-🎤 Voice messages are automatically transcribed and processed
-📝 Text messages are processed directly
+🎤 Голосові повідомлення автоматично розпізнаються та обробляються
+📝 Текстові повідомлення обробляються безпосередньо
+
+� Режим роботи: ${authService.getMode() === 'debug' ? 'НАЛАГОДЖЕННЯ' : 'РОБОЧИЙ'}
     `
 
-    await bot.sendMessage(msg.chat.id, helpMessage)
+    await bot.sendMessage(chatId, helpMessage)
   }
 
   /**

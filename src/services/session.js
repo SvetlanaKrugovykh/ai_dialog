@@ -19,7 +19,9 @@ class SessionService {
         state: 'idle', // idle, waiting_for_answer
         currentQuestion: null,
         lastActivity: new Date(),
-        conversationHistory: []
+        conversationHistory: [],
+        authenticated: false,
+        userInfo: null
       })
       logger.info(`Created new session for user ${userId}`)
     }
