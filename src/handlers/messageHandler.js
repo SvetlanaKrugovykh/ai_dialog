@@ -130,8 +130,9 @@ class MessageHandler {
     // Send auth message only once
     await bot.sendMessage(chatId, authResult.message)
     
-    // Then send welcome message
-    await bot.sendMessage(chatId, messages.bot.ready)
+    // Get bot info and send welcome message
+    const botInfo = await bot.getMe()
+    await bot.sendMessage(chatId, messages.bot.ready(botInfo.first_name || botInfo.username))
     logger.info(logMessages.messages.userStarted(userId))
   }
 
