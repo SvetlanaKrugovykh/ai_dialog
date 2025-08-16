@@ -581,43 +581,121 @@ class MessageHandler {
       // Simple keyword-based editing logic
       // In production, this could use AI to understand natural language editing instructions
       
+      logger.info(`Applying edits: "${editInstructions}" to content length ${originalContent.length}`)
+      
       let updatedContent = originalContent
       const lowerEdit = editInstructions.toLowerCase()
 
-      // Handle title changes
-      if (lowerEdit.includes('заголовок') || lowerEdit.includes('назва')) {
-        const titleMatch = editInstructions.match(/(?:заголовок|назва)(?:\s+на)?:?\s*(.+?)(?:\n|$)/i)
+      logger.info(`Lowercase edit instructions: "${lowerEdit}"`)
+
+      // Handle title changes (with Surzhyk support)
+      if (lowerEdit.includes('заголовок') || lowerEdit.includes('заголовок') || 
+          lowerEdit.includes('назва') || lowerEdit.includes('название') || 
+          lowerEdit.includes('title') || lowerEdit.includes('тема')) {
+        logger.info('Detected title change request')
+        const titleMatch = editInstructions.match(/(?:заголовок|заголовок|назва|название|title|тема)(?:\s+на)?:?\s*(.+?)(?:\n|$)/i)
         if (titleMatch) {
           const newTitle = titleMatch[1].trim()
+          logger.info(`Changing title to: "${newTitle}"`)
           updatedContent = updatedContent.replace(/📝\s*\*\*Заголовок:\*\*\s*[^\n]+/i, `📝 **Заголовок:** ${newTitle}`)
         }
       }
 
       // Handle description changes
-      if (lowerEdit.includes('опис') || lowerEdit.includes('проблем')) {
-        const descMatch = editInstructions.match(/(?:опис|проблем)(?:\s+на)?:?\s*(.+?)(?:\n|$)/i)
+      if (lowerEdit.includes('опис') || lowerEdit.includes('проблем') || lowerEdit.includes('описан')) {
+        logger.info('Detected description change request')
+        const descMatch = updatedContent.match(/📄\s*\*\*Опис:\*\*\s*(.+?)(?=\n🔴|\n🟡|\n🟢|\n⚫|\n📊|$)/s)
         if (descMatch) {
-          const newDesc = descMatch[1].trim()
-          updatedContent = updatedContent.replace(/📄\s*\*\*Опис:\*\*\s*[^\n]+/i, `📄 **Опис:** ${newDesc}`)
+          const currentDesc = descMatch[1].trim()
+          logger.info(`Current description: "${currentDesc.substring(0, 50)}..."`)
+          
+          // Check if it's "add to description" or "replace description"
+          const isAddToDescription = lowerEdit.includes('додати') || lowerEdit.includes('добав') || 
+                                   lowerEdit.includes('доповн') || lowerEdit.includes('дополн') ||
+                                   lowerEdit.includes('добавить') || lowerEdit.includes('append') ||
+                                   lowerEdit.includes('add')
+          
+          const isReplaceDescription = lowerEdit.includes('замін') || lowerEdit.includes('заме́н') ||
+                                     lowerEdit.includes('змін') || lowerEdit.includes('перепиш') ||
+                                     lowerEdit.includes('replace') || lowerEdit.includes('change')
+          
+          // Extract the new description part from the edit instruction
+          let newDescPart = editInstructions
+            .replace(/додати до опису|додати в опис|змінити опис|замінити опис|опис проблеми|опис|description|додати|добавить|доповнити|заменить|замінити|дополнить|изменить/gi, '')
+            .replace(/^(що|что|то что|те що|на|:)?\s*/i, '')
+            .trim()
+          
+          if (newDescPart) {
+            if (isAddToDescription && !isReplaceDescription) {
+              // Add to existing description
+              const separator = currentDesc.includes('\n') ? '\n\n' : '. '
+              const newFullDesc = `${currentDesc}${separator}${newDescPart}`
+              updatedContent = updatedContent.replace(
+                /📄\s*\*\*Опис:\*\*\s*(.+?)(?=\n🔴|\n🟡|\n🟢|\n⚫|\n📊|$)/s,
+                `📄 **Опис:** ${newFullDesc}`
+              )
+              logger.info('Description successfully extended')
+            } else {
+              // Replace description (default behavior or explicit replace)
+              updatedContent = updatedContent.replace(
+                /📄\s*\*\*Опис:\*\*\s*(.+?)(?=\n🔴|\n🟡|\n🟢|\n⚫|\n📊|$)/s,
+                `📄 **Опис:** ${newDescPart}`
+              )
+              logger.info('Description successfully replaced')
+            }
+          }
         }
       }
 
-      // Handle priority changes
-      if (lowerEdit.includes('пріоритет')) {
+      // Handle priority changes (with Surzhyk support)
+      if (lowerEdit.includes('пріоритет') || lowerEdit.includes('приоритет') || lowerEdit.includes('priority')) {
+        logger.info('Detected priority change request')
         let newPriority = 'Medium'
-        if (lowerEdit.includes('високий') || lowerEdit.includes('high')) {
+        let priorityEmoji = '🟡'
+        
+        // High priority keywords (Ukrainian + Russian + Surzhyk)
+        if (lowerEdit.includes('високий') || lowerEdit.includes('высокий') || lowerEdit.includes('high') || 
+            lowerEdit.includes('вищий') || lowerEdit.includes('вище') || lowerEdit.includes('выше') ||
+            lowerEdit.includes('підвищ') || lowerEdit.includes('повыс') || lowerEdit.includes('збільш') ||
+            lowerEdit.includes('увеличь') || lowerEdit.includes('повысь')) {
           newPriority = 'High'
-        } else if (lowerEdit.includes('низький') || lowerEdit.includes('low')) {
-          newPriority = 'Low'
-        } else if (lowerEdit.includes('критичний') || lowerEdit.includes('critical')) {
+          priorityEmoji = '🔴'
+          logger.info('Setting priority to High')
+        } 
+        // Low priority keywords (Ukrainian + Russian + Surzhyk)
+        else if (lowerEdit.includes('низький') || lowerEdit.includes('низкий') || lowerEdit.includes('low') ||
+                 lowerEdit.includes('нижч') || lowerEdit.includes('ниже') || lowerEdit.includes('зменш') ||
+                 lowerEdit.includes('уменьш') || lowerEdit.includes('понизь') || lowerEdit.includes('снизь')) {
+          newPriority = 'Low'  
+          priorityEmoji = '🟢'
+          logger.info('Setting priority to Low')
+        } 
+        // Critical priority keywords (Ukrainian + Russian + Surzhyk)
+        else if (lowerEdit.includes('критичний') || lowerEdit.includes('критический') || lowerEdit.includes('critical') ||
+                 lowerEdit.includes('терміново') || lowerEdit.includes('срочно') || lowerEdit.includes('urgent') ||
+                 lowerEdit.includes('термінов') || lowerEdit.includes('срочн')) {
           newPriority = 'Critical'
+          priorityEmoji = '⚫'
+          logger.info('Setting priority to Critical')
         }
-        updatedContent = updatedContent.replace(/🔴\s*\*\*Пріоритет:\*\*\s*[^\n]+/i, `🔴 **Пріоритет:** ${newPriority}`)
+        
+        // Replace priority line (with any emoji)
+        const oldContent = updatedContent
+        updatedContent = updatedContent.replace(/[🔴🟡🟢⚫]\s*\*\*Пріоритет:\*\*\s*[^\n]+/i, `${priorityEmoji} **Пріоритет:** ${newPriority}`)
+        
+        if (oldContent !== updatedContent) {
+          logger.info(`Priority successfully changed to ${newPriority}`)
+        } else {
+          logger.warn('Failed to replace priority line')
+        }
       }
 
-      // If no specific changes detected, append the edit as additional information
+      // Log final result
       if (updatedContent === originalContent) {
+        logger.info('No changes detected, adding as additional information')
         updatedContent += `\n\n🔄 **Додаткова інформація:**\n${editInstructions}`
+      } else {
+        logger.info('Content successfully updated')
       }
 
       return updatedContent
