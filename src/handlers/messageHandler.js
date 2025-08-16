@@ -129,9 +129,6 @@ class MessageHandler {
         case 'editvoice':
           await this.startVoiceEditing(bot, chatId, userId, ticketId)
           break
-        case 'rewrite':
-          await this.rewriteTicket(bot, chatId, userId, ticketId)
-          break
         case 'back':
           await this.backToTicketPreview(bot, chatId, userId, ticketId)
           break
@@ -225,9 +222,6 @@ class MessageHandler {
             [
               { text: messages.tickets.buttons.editText, callback_data: `edittext_${ticketId}` },
               { text: messages.tickets.buttons.editVoice, callback_data: `editvoice_${ticketId}` }
-            ],
-            [
-              { text: messages.tickets.buttons.rewrite, callback_data: `rewrite_${ticketId}` }
             ],
             [
               { text: messages.tickets.buttons.back, callback_data: `back_${ticketId}` }
@@ -676,32 +670,6 @@ class MessageHandler {
       await bot.sendMessage(chatId, 
         messages.tickets.voiceEditInstruction,
         { parse_mode: 'Markdown' }
-      )
-
-    } catch (error) {
-      logger.error(logMessages.tickets.editError(userId, ticketId), error)
-      await bot.sendMessage(chatId, messages.errors.generalError)
-    }
-  }
-
-  /**
-   * Start complete rewrite
-   */
-  async rewriteTicket(bot, chatId, userId, ticketId) {
-    try {
-      const session = sessionService.getSession(userId)
-      
-      // Delete old pending ticket
-      if (session.pendingTickets) {
-        delete session.pendingTickets[ticketId]
-      }
-      
-      // Clear any editing state
-      session.editingTicket = null
-      sessionService.updateSession(userId, session)
-
-      await bot.sendMessage(chatId, 
-        messages.tickets.rewriteInstruction
       )
 
     } catch (error) {
