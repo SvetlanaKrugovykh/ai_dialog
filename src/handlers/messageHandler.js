@@ -2,6 +2,7 @@ const localAIService = require('../services/localAI')
 const chatGPTService = require('../services/chatgpt')
 const sessionService = require('../services/session')
 const authService = require('../services/auth')
+const ticketService = require('../services/ticketService')
 const logger = require('../utils/logger')
 const messages = require('../../data/messages')
 const logMessages = require('../../data/logMessages')
@@ -185,21 +186,43 @@ class MessageHandler {
         return
       }
 
-      // Here would be the actual Service-Desk API call
-      // For now, we'll just simulate successful creation
-      await bot.sendMessage(chatId, messages.success.ticketSent(pendingTicket.id))
-      
-      // Remove from pending tickets
-      if (session.pendingTickets) {
-        delete session.pendingTickets[ticketId]
-        sessionService.updateSession(userId, session)
-      }
+      // Show processing message
+      await bot.sendChatAction(chatId, 'typing')
+      await bot.sendMessage(chatId, messages.tickets.processingMessage)
 
-      logger.info(logMessages.tickets.confirmed(userId, ticketId))
+      // Create ticket in Service Desk using ticketService
+      const creationResult = await ticketService.createTicket({
+        content: pendingTicket.content,
+        telegramId: userId,
+        userInfo: session.userInfo
+      })
+
+      if (creationResult.success) {
+        // Success - send confirmation with ticket ID
+        await bot.sendMessage(chatId, creationResult.message)
+        
+        // Remove from pending tickets
+        if (session.pendingTickets) {
+          delete session.pendingTickets[ticketId]
+          sessionService.updateSession(userId, session)
+        }
+
+        logger.info(`Ticket successfully created: ${creationResult.ticketId} for user ${userId}`)
+      } else {
+        // Error - show error message but keep ticket pending
+        await bot.sendMessage(chatId, creationResult.message)
+        logger.error(`Failed to create ticket for user ${userId}: ${creationResult.error}`)
+        
+        // In debug mode, still remove the ticket to avoid accumulation
+        if (ticketService.getMode() === 'debug' && session.pendingTickets) {
+          delete session.pendingTickets[ticketId]
+          sessionService.updateSession(userId, session)
+        }
+      }
 
     } catch (error) {
       logger.error(logMessages.tickets.confirmError(userId, ticketId), error)
-      await bot.sendMessage(chatId, messages.errors.ticketConfirmError)
+      await bot.sendMessage(chatId, messages.tickets.creationError)
     }
   }
 
@@ -634,9 +657,7 @@ class MessageHandler {
       logger.info(`Lowercase edit instructions: "${lowerEdit}"`)
 
       // Handle title changes (with Surzhyk support) - ALWAYS REPLACE
-      if (lowerEdit.includes('заголовок') || lowerEdit.includes('заголовок') || 
-          lowerEdit.includes('назва') || lowerEdit.includes('название') || 
-          lowerEdit.includes('title') || lowerEdit.includes('тема')) {
+      if (messages.tickets.editKeywords.title.some(keyword => lowerEdit.includes(keyword))) {
         logger.info('Detected title change request')
         
         // Extract title from the edit instruction 
@@ -653,7 +674,7 @@ class MessageHandler {
       }
 
       // Handle description changes
-      if (lowerEdit.includes('опис') || lowerEdit.includes('проблем') || lowerEdit.includes('описан')) {
+      if (messages.tickets.editKeywords.description.some(keyword => lowerEdit.includes(keyword))) {
         logger.info('Detected description change request')
         const descMatch = updatedContent.match(/📄\s*\*\*Опис:\*\*\s*(.+?)(?=\n🔴|\n🟡|\n🟢|\n⚫|\n📊|$)/s)
         if (descMatch) {
@@ -697,7 +718,7 @@ class MessageHandler {
       }
 
       // Handle priority changes (with Surzhyk support)
-      if (lowerEdit.includes('пріоритет') || lowerEdit.includes('приоритет') || lowerEdit.includes('priority')) {
+      if (messages.tickets.editKeywords.priority.some(keyword => lowerEdit.includes(keyword))) {
         logger.info('Detected priority change request')
         let newPriority = 'Medium'
         let priorityEmoji = '🟡'
