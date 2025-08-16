@@ -13,7 +13,7 @@ class TicketParser {
         'резервне копіювання', 'відновлення', 'технічна підтримка',
         'оновлення', 'ліцензія', 'обладнання', 'монітор', 'клавіатура',
         'миша', 'звук', 'відео', 'камера', 'мікрофон', 'wi-fi', 'wifi',
-        
+
         // Russian keywords for IT department
         'компьютер', 'интернет', 'почта', 'принтер', 'программа', 'система',
         'сеть', 'сайт', 'сервер', 'база данных', 'пароль', 'доступ',
@@ -21,13 +21,13 @@ class TicketParser {
         'резервное копирование', 'восстановление', 'техническая поддержка',
         'обновление', 'лицензия', 'оборудование', 'монитор', 'клавиатура',
         'мышь', 'звук', 'видео', 'камера', 'микрофон', 'вай-фай',
-        
+
         // Common IT terms
         'it', 'айти', 'email', 'е-мейл', 'windows', 'office', 'outlook',
         'excel', 'word', 'powerpoint', 'skype', 'teams', 'zoom',
         'vpn', 'ip', 'dns', 'tcp', 'http', 'https', 'ftp', 'sql'
       ],
-      
+
       Legal: [
         // Ukrainian keywords for Legal department
         'юрист', 'юридичний', 'договір', 'контракт', 'угода', 'документ',
@@ -37,7 +37,7 @@ class TicketParser {
         'судовий', 'претензія', 'позов', 'арбітраж', 'медіація',
         'нотаріус', 'довіреність', 'заповіт', 'спадщина', 'податки',
         'відповідальність', 'штраф', 'санкції', 'компліанс',
-        
+
         // Russian keywords for Legal department
         'юрист', 'юридический', 'договор', 'контракт', 'соглашение', 'документ',
         'правовой', 'закон', 'законодательство', 'нормативный', 'акт',
@@ -47,7 +47,7 @@ class TicketParser {
         'нотариус', 'доверенность', 'завещание', 'наследство', 'налоги',
         'ответственность', 'штраф', 'санкции', 'комплаенс'
       ],
-      
+
       HR: [
         // Ukrainian keywords for HR department
         'кадри', 'персонал', 'співробітник', 'працівник', 'найм', 'звільнення',
@@ -56,7 +56,7 @@ class TicketParser {
         'переведення', 'графік', 'робочий час', 'відгул', 'прогул',
         'дисципліна', 'мотивація', 'командировка', 'витрати', 'компенсація',
         'соціальний пакет', 'страхування', 'медичний огляд', 'профспілка',
-        
+
         // Russian keywords for HR department
         'кадры', 'персонал', 'сотрудник', 'работник', 'найм', 'увольнение',
         'отпуск', 'больничный', 'зарплата', 'премия', 'бонус', 'стажировка',
@@ -64,12 +64,12 @@ class TicketParser {
         'перевод', 'график', 'рабочее время', 'отгул', 'прогул',
         'дисциплина', 'мотивация', 'командировка', 'расходы', 'компенсация',
         'социальный пакет', 'страхование', 'медосмотр', 'профсоюз',
-        
+
         // Common HR terms
         'hr', 'эйчар', 'cv', 'резюме', 'собеседование', 'рекрутинг'
       ]
     }
-    
+
     // Priority keywords
     this.priorityKeywords = {
       High: [
@@ -112,7 +112,7 @@ class TicketParser {
       }
 
       logger.info(logMessages.processing.ticketCreated(clientId, ticket.ticket_id, ticket.department))
-      
+
       return ticket
     } catch (error) {
       logger.error(logMessages.services.ticketParsingError, error)
@@ -140,7 +140,7 @@ class TicketParser {
     const lowerText = text.toLowerCase()
     let maxScore = 0
     let bestDepartment = 'IT' // Default to IT
-    
+
     for (const [dept, keywords] of Object.entries(this.departmentKeywords)) {
       let score = 0
       for (const keyword of keywords) {
@@ -152,13 +152,13 @@ class TicketParser {
           }
         }
       }
-      
+
       if (score > maxScore) {
         maxScore = score
         bestDepartment = dept
       }
     }
-    
+
     return bestDepartment
   }
 
@@ -169,28 +169,28 @@ class TicketParser {
    */
   determinePriority(text) {
     const lowerText = text.toLowerCase()
-    
+
     // Check for high priority keywords first
     for (const keyword of this.priorityKeywords.High) {
       if (lowerText.includes(keyword.toLowerCase())) {
         return 'High'
       }
     }
-    
+
     // Check for low priority keywords
     for (const keyword of this.priorityKeywords.Low) {
       if (lowerText.includes(keyword.toLowerCase())) {
         return 'Low'
       }
     }
-    
+
     // Check for medium priority keywords or default to medium
     for (const keyword of this.priorityKeywords.Medium) {
       if (lowerText.includes(keyword.toLowerCase())) {
         return 'Medium'
       }
     }
-    
+
     return 'Medium' // Default priority
   }
 
@@ -202,7 +202,7 @@ class TicketParser {
   generateTitle(text) {
     // Take first meaningful part of the text as title
     let title = text.trim()
-    
+
     // If text is too long, take first sentence or first 50 characters
     if (title.length > 50) {
       // Try to find first sentence
@@ -214,7 +214,7 @@ class TicketParser {
         title = title.substring(0, 47) + '...'
       }
     }
-    
+
     // Capitalize first letter
     return title.charAt(0).toUpperCase() + title.slice(1)
   }
@@ -226,7 +226,7 @@ class TicketParser {
    */
   detectLanguage(text) {
     const lowerText = text.toLowerCase()
-    
+
     // Ukrainian indicators
     const ukrainianChars = (lowerText.match(/[іїєґ]/g) || []).length
     const ukrainianWords = [
@@ -234,26 +234,26 @@ class TicketParser {
       'буде', 'має', 'можуть', 'повинен', 'після', 'перед'
     ]
     let ukrainianScore = ukrainianChars * 2
-    
+
     for (const word of ukrainianWords) {
       if (lowerText.includes(word)) {
         ukrainianScore += 1
       }
     }
-    
+
     // Russian indicators
     const russianWords = [
       'что', 'или', 'если', 'который', 'поэтому', 'нужно', 'можно',
       'будет', 'имеет', 'могут', 'должен', 'после', 'перед'
     ]
     let russianScore = 0
-    
+
     for (const word of russianWords) {
       if (lowerText.includes(word)) {
         russianScore += 1
       }
     }
-    
+
     if (ukrainianScore > russianScore) {
       return ukrainianScore > 2 ? 'Ukrainian' : 'Mixed'
     } else if (russianScore > ukrainianScore) {
@@ -274,15 +274,14 @@ class TicketParser {
       'Legal': '⚖️',
       'HR': '👥'
     }
-    
+
     const priorityEmojis = {
       'High': '🔴',
       'Medium': '🟡',
       'Low': '🟢'
     }
-    
-    return `🎫 **Заявка створена**
 
+    return `🎫 **Заявка:**
 📋 **ID:** ${ticket.ticket_id}
 ${departmentEmojis[ticket.department] || '📁'} **Відділ:** ${ticket.department}
 📂 **Категорія:** ${ticket.category}

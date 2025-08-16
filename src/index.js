@@ -18,6 +18,16 @@ bot.on('message', async (msg) => {
   }
 })
 
+bot.on('callback_query', async (callbackQuery) => {
+  try {
+    console.log('DEBUG: Callback query received:', callbackQuery.data)
+    await messageHandler.handleMessage(bot, { callback_query: callbackQuery })
+  } catch (error) {
+    logger.error(logMessages.general.callbackHandlingError, error)
+    await bot.answerCallbackQuery(callbackQuery.id, { text: messages.errors.generalError })
+  }
+})
+
 bot.on('polling_error', (error) => {
   logger.error('Polling error:', error)
 

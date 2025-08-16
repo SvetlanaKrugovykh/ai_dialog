@@ -34,8 +34,15 @@ class MessageHandler {
    */
   async handleMessage(bot, msg) {
     try {
-      const chatId = msg.chat.id
-      const userId = msg.from.id.toString()
+      const chatId = msg.chat?.id || msg.callback_query?.message?.chat?.id
+      const userId = msg.from?.id?.toString() || msg.callback_query?.from?.id?.toString()
+      
+      // Handle callback queries from inline keyboards first
+      if (msg.callback_query) {
+        logger.info(`Callback query received from user ${userId}: ${msg.callback_query.data}`)
+        await this.handleCallbackQuery(bot, msg.callback_query)
+        return
+      }
       
       logger.info(logMessages.messages.received(userId, msg.voice ? 'voice' : 'text'))
 
@@ -82,7 +89,159 @@ class MessageHandler {
 
     } catch (error) {
       logger.error(logMessages.general.messageHandlingError, error)
-      await bot.sendMessage(msg.chat.id, messages.errors.generalError)
+      const chatId = msg.chat?.id || msg.callback_query?.message?.chat?.id
+      if (chatId) {
+        await bot.sendMessage(chatId, messages.errors.generalError)
+      }
+    }
+  }
+
+  /**
+   * Handle callback queries from inline keyboards
+   * @param {Object} bot - bot instance
+   * @param {Object} callbackQuery - callback query object
+   */
+  async handleCallbackQuery(bot, callbackQuery) {
+    try {
+      const chatId = callbackQuery.message.chat.id
+      const userId = callbackQuery.from.id.toString()
+      const data = callbackQuery.data
+
+      // Acknowledge the callback query
+      await bot.answerCallbackQuery(callbackQuery.id)
+
+      // Parse callback data: action_ticketId
+      const [action, ticketId] = data.split('_')
+
+      switch (action) {
+        case 'confirm':
+          await this.confirmTicket(bot, chatId, userId, ticketId)
+          break
+        case 'cancel':
+          await this.cancelTicket(bot, chatId, userId, ticketId)
+          break
+        case 'edit':
+          await this.editTicket(bot, chatId, userId, ticketId)
+          break
+        case 'edittext':
+          await this.startTextEditing(bot, chatId, userId, ticketId)
+          break
+        case 'editvoice':
+          await this.startVoiceEditing(bot, chatId, userId, ticketId)
+          break
+        case 'rewrite':
+          await this.rewriteTicket(bot, chatId, userId, ticketId)
+          break
+        case 'back':
+          await this.backToTicketPreview(bot, chatId, userId, ticketId)
+          break
+        default:
+          logger.warn(`Unknown callback action: ${action}`)
+      }
+
+    } catch (error) {
+      logger.error(logMessages.general.callbackHandlingError, error)
+      await bot.sendMessage(callbackQuery.message.chat.id, messages.errors.generalError)
+    }
+  }
+
+  /**
+   * Confirm and send ticket to Service-Desk
+   */
+  async confirmTicket(bot, chatId, userId, ticketId) {
+    try {
+      const session = sessionService.getSession(userId)
+      const pendingTicket = session.pendingTickets?.[ticketId]
+
+      if (!pendingTicket) {
+        await bot.sendMessage(chatId, messages.errors.ticketNotFound)
+        return
+      }
+
+      // Here would be the actual Service-Desk API call
+      // For now, we'll just simulate successful creation
+      await bot.sendMessage(chatId, messages.success.ticketSent(pendingTicket.id))
+      
+      // Remove from pending tickets
+      if (session.pendingTickets) {
+        delete session.pendingTickets[ticketId]
+        sessionService.updateSession(userId, session)
+      }
+
+      logger.info(logMessages.tickets.confirmed(userId, ticketId))
+
+    } catch (error) {
+      logger.error(logMessages.tickets.confirmError(userId, ticketId), error)
+      await bot.sendMessage(chatId, messages.errors.ticketConfirmError)
+    }
+  }
+
+  /**
+   * Cancel ticket creation
+   */
+  async cancelTicket(bot, chatId, userId, ticketId) {
+    try {
+      const session = sessionService.getSession(userId)
+      
+      if (session.pendingTickets) {
+        delete session.pendingTickets[ticketId]
+        sessionService.updateSession(userId, session)
+      }
+
+      await bot.sendMessage(chatId, messages.success.ticketCancelled)
+      logger.info(logMessages.tickets.cancelled(userId, ticketId))
+
+    } catch (error) {
+      logger.error(logMessages.tickets.cancelError(userId, ticketId), error)
+      await bot.sendMessage(chatId, messages.errors.generalError)
+    }
+  }
+
+  /**
+   * Start ticket editing process
+   */
+  async editTicket(bot, chatId, userId, ticketId) {
+    try {
+      const session = sessionService.getSession(userId)
+      const pendingTicket = session.pendingTickets?.[ticketId]
+
+      if (!pendingTicket) {
+        await bot.sendMessage(chatId, messages.errors.ticketNotFound)
+        return
+      }
+
+      // Set editing mode
+      if (!session.editingTicket) {
+        session.editingTicket = {}
+      }
+      session.editingTicket.ticketId = ticketId
+      session.editingTicket.mode = 'waiting'
+      sessionService.updateSession(userId, session)
+
+      // Create editing options keyboard
+      const editOptions = {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: messages.tickets.buttons.editText, callback_data: `edittext_${ticketId}` },
+              { text: messages.tickets.buttons.editVoice, callback_data: `editvoice_${ticketId}` }
+            ],
+            [
+              { text: messages.tickets.buttons.rewrite, callback_data: `rewrite_${ticketId}` }
+            ],
+            [
+              { text: messages.tickets.buttons.back, callback_data: `back_${ticketId}` }
+            ]
+          ]
+        }
+      }
+
+      await bot.sendMessage(chatId, messages.tickets.editOptions, editOptions)
+      logger.info(logMessages.tickets.editStarted(userId, ticketId))
+
+    } catch (error) {
+      logger.error(logMessages.tickets.editError(userId, ticketId), error)
+      await bot.sendMessage(chatId, messages.errors.generalError)
     }
   }
 
@@ -231,6 +390,24 @@ class MessageHandler {
         writer.on('error', reject)
       })
 
+      // Check if user is in voice editing mode
+      if (session.editingTicket && session.editingTicket.mode === 'voice') {
+        if (process.env.ENABLE_SPEECH_TO_TEXT === 'true') {
+          // Process voice for editing
+          const segmentNumber = session.conversationHistory.length + 1
+          const transcription = await localAIService.speechToText(tempFilePath, userId, segmentNumber)
+          await this.processTicketEdit(bot, chatId, userId, transcription, 'voice')
+        } else {
+          await bot.sendMessage(chatId, messages.errors.voiceProcessingError)
+        }
+        
+        // Clean up temp file
+        fs.unlink(tempFilePath, (err) => {
+          if (err) logger.warn(logMessages.files.tempFileDeleteFailed, err)
+        })
+        return
+      }
+
       // Get current message number for this user
       const segmentNumber = session.conversationHistory.length + 1
 
@@ -243,8 +420,9 @@ class MessageHandler {
           sessionService.addToHistory(userId, 'voice_message', `[Voice message #${segmentNumber}]`)
           sessionService.addToHistory(userId, 'ai_response', result)
 
-          // Send result to user
-          await bot.sendMessage(chatId, messages.processing.aiResponse(result))
+          // Create pending ticket for confirmation instead of sending directly
+          await this.createPendingTicket(bot, chatId, userId, result, 'voice')
+
         } else {
           // Speech-to-text is disabled - skip to fallback
           logger.warn(logMessages.processing.speechToTextDisabled(userId))
@@ -289,6 +467,13 @@ class MessageHandler {
     const messageText = msg.text
 
     try {
+      // Check if user is in editing mode
+      const session = sessionService.getSession(userId)
+      if (session.editingTicket && session.editingTicket.mode === 'text') {
+        await this.processTicketEdit(bot, chatId, userId, messageText, 'text')
+        return
+      }
+
       // Show processing indicator
       await bot.sendChatAction(chatId, 'typing')
 
@@ -301,8 +486,9 @@ class MessageHandler {
           sessionService.addToHistory(userId, 'text_message', messageText)
           sessionService.addToHistory(userId, 'ai_response', result)
 
-          // Send result to user
-          await bot.sendMessage(chatId, messages.processing.aiResponse(result))
+          // Create pending ticket for confirmation instead of sending directly
+          await this.createPendingTicket(bot, chatId, userId, result, 'text')
+
         } else {
           // Local AI is disabled - skip to fallback
           logger.warn(logMessages.processing.localAIDisabled(userId))
@@ -330,6 +516,297 @@ class MessageHandler {
     } catch (error) {
       logger.error(logMessages.processing.textProcessingError(userId), error)
       await bot.sendMessage(chatId, messages.errors.textProcessingError)
+    }
+  }
+
+  /**
+   * Process ticket editing from text or voice input
+   */
+  async processTicketEdit(bot, chatId, userId, editText, inputType) {
+    try {
+      const session = sessionService.getSession(userId)
+      const ticketId = session.editingTicket?.ticketId
+      const pendingTicket = session.pendingTickets?.[ticketId]
+
+      if (!pendingTicket || !ticketId) {
+        await bot.sendMessage(chatId, messages.errors.ticketNotFound)
+        return
+      }
+
+      // Show processing indicator
+      await bot.sendChatAction(chatId, 'typing')
+      await bot.sendMessage(chatId, messages.tickets.processing)
+
+      // Process edit instructions
+      const updatedTicket = await this.applyTicketEdits(pendingTicket.content, editText)
+      
+      // Update pending ticket
+      pendingTicket.content = updatedTicket
+      pendingTicket.lastModified = new Date().toISOString()
+      session.pendingTickets[ticketId] = pendingTicket
+
+      // Clear editing mode
+      session.editingTicket = null
+      sessionService.updateSession(userId, session)
+
+      // Show updated ticket with confirmation buttons
+      const confirmationKeyboard = {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: messages.tickets.buttons.confirm, callback_data: `confirm_${ticketId}` },
+              { text: messages.tickets.buttons.cancel, callback_data: `cancel_${ticketId}` }
+            ],
+            [
+              { text: messages.tickets.buttons.editAgain, callback_data: `edit_${ticketId}` }
+            ]
+          ]
+        }
+      }
+
+      const ticketPreview = messages.tickets.updatedPreview(updatedTicket)
+
+      await bot.sendMessage(chatId, ticketPreview, {
+        ...confirmationKeyboard,
+        parse_mode: 'Markdown'
+      })
+
+      logger.info(`Ticket ${ticketId} edited by user ${userId} via ${inputType}`)
+
+    } catch (error) {
+      logger.error(logMessages.tickets.editError(userId, 'unknown'), error)
+      await bot.sendMessage(chatId, messages.errors.generalError)
+    }
+  }
+
+  /**
+   * Apply edit instructions to ticket content
+   */
+  async applyTicketEdits(originalContent, editInstructions) {
+    try {
+      // Simple keyword-based editing logic
+      // In production, this could use AI to understand natural language editing instructions
+      
+      let updatedContent = originalContent
+      const lowerEdit = editInstructions.toLowerCase()
+
+      // Handle title changes
+      if (lowerEdit.includes('заголовок') || lowerEdit.includes('назва')) {
+        const titleMatch = editInstructions.match(/(?:заголовок|назва)(?:\s+на)?:?\s*(.+?)(?:\n|$)/i)
+        if (titleMatch) {
+          const newTitle = titleMatch[1].trim()
+          updatedContent = updatedContent.replace(/📝\s*\*\*Заголовок:\*\*\s*[^\n]+/i, `📝 **Заголовок:** ${newTitle}`)
+        }
+      }
+
+      // Handle description changes
+      if (lowerEdit.includes('опис') || lowerEdit.includes('проблем')) {
+        const descMatch = editInstructions.match(/(?:опис|проблем)(?:\s+на)?:?\s*(.+?)(?:\n|$)/i)
+        if (descMatch) {
+          const newDesc = descMatch[1].trim()
+          updatedContent = updatedContent.replace(/📄\s*\*\*Опис:\*\*\s*[^\n]+/i, `📄 **Опис:** ${newDesc}`)
+        }
+      }
+
+      // Handle priority changes
+      if (lowerEdit.includes('пріоритет')) {
+        let newPriority = 'Medium'
+        if (lowerEdit.includes('високий') || lowerEdit.includes('high')) {
+          newPriority = 'High'
+        } else if (lowerEdit.includes('низький') || lowerEdit.includes('low')) {
+          newPriority = 'Low'
+        } else if (lowerEdit.includes('критичний') || lowerEdit.includes('critical')) {
+          newPriority = 'Critical'
+        }
+        updatedContent = updatedContent.replace(/🔴\s*\*\*Пріоритет:\*\*\s*[^\n]+/i, `🔴 **Пріоритет:** ${newPriority}`)
+      }
+
+      // If no specific changes detected, append the edit as additional information
+      if (updatedContent === originalContent) {
+        updatedContent += `\n\n🔄 **Додаткова інформація:**\n${editInstructions}`
+      }
+
+      return updatedContent
+
+    } catch (error) {
+      logger.error('Error applying ticket edits:', error)
+      return originalContent + `\n\n🔄 **Додаткова інформація:**\n${editInstructions}`
+    }
+  }
+
+  /**
+   * Start text editing mode
+   */
+  async startTextEditing(bot, chatId, userId, ticketId) {
+    try {
+      const session = sessionService.getSession(userId)
+      
+      if (!session.editingTicket) {
+        session.editingTicket = {}
+      }
+      session.editingTicket.ticketId = ticketId
+      session.editingTicket.mode = 'text'
+      sessionService.updateSession(userId, session)
+
+      await bot.sendMessage(chatId, 
+        messages.tickets.textEditInstruction,
+        { parse_mode: 'Markdown' }
+      )
+
+    } catch (error) {
+      logger.error(logMessages.tickets.editError(userId, ticketId), error)
+      await bot.sendMessage(chatId, messages.errors.generalError)
+    }
+  }
+
+  /**
+   * Start voice editing mode
+   */
+  async startVoiceEditing(bot, chatId, userId, ticketId) {
+    try {
+      const session = sessionService.getSession(userId)
+      
+      if (!session.editingTicket) {
+        session.editingTicket = {}
+      }
+      session.editingTicket.ticketId = ticketId
+      session.editingTicket.mode = 'voice'
+      sessionService.updateSession(userId, session)
+
+      await bot.sendMessage(chatId, 
+        messages.tickets.voiceEditInstruction,
+        { parse_mode: 'Markdown' }
+      )
+
+    } catch (error) {
+      logger.error(logMessages.tickets.editError(userId, ticketId), error)
+      await bot.sendMessage(chatId, messages.errors.generalError)
+    }
+  }
+
+  /**
+   * Start complete rewrite
+   */
+  async rewriteTicket(bot, chatId, userId, ticketId) {
+    try {
+      const session = sessionService.getSession(userId)
+      
+      // Delete old pending ticket
+      if (session.pendingTickets) {
+        delete session.pendingTickets[ticketId]
+      }
+      
+      // Clear any editing state
+      session.editingTicket = null
+      sessionService.updateSession(userId, session)
+
+      await bot.sendMessage(chatId, 
+        messages.tickets.rewriteInstruction
+      )
+
+    } catch (error) {
+      logger.error(logMessages.tickets.editError(userId, ticketId), error)
+      await bot.sendMessage(chatId, messages.errors.generalError)
+    }
+  }
+
+  /**
+   * Return to ticket preview
+   */
+  async backToTicketPreview(bot, chatId, userId, ticketId) {
+    try {
+      const session = sessionService.getSession(userId)
+      const pendingTicket = session.pendingTickets?.[ticketId]
+
+      if (!pendingTicket) {
+        await bot.sendMessage(chatId, messages.errors.ticketNotFound)
+        return
+      }
+
+      // Clear editing mode
+      session.editingTicket = null
+      sessionService.updateSession(userId, session)
+
+      // Show ticket preview again
+      const confirmationKeyboard = {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: messages.tickets.buttons.confirm, callback_data: `confirm_${ticketId}` },
+              { text: messages.tickets.buttons.cancel, callback_data: `cancel_${ticketId}` }
+            ],
+            [
+              { text: messages.tickets.buttons.edit, callback_data: `edit_${ticketId}` }
+            ]
+          ]
+        }
+      }
+
+      const ticketPreview = messages.tickets.preview(pendingTicket.content)
+
+      await bot.sendMessage(chatId, ticketPreview, {
+        ...confirmationKeyboard,
+        parse_mode: 'Markdown'
+      })
+
+    } catch (error) {
+      logger.error(logMessages.tickets.editError(userId, ticketId), error)
+      await bot.sendMessage(chatId, messages.errors.generalError)
+    }
+  }
+
+  /**
+   * Create pending ticket for user confirmation
+   */
+  async createPendingTicket(bot, chatId, userId, ticketContent, sourceType) {
+    try {
+      // Generate unique ticket ID
+      const ticketId = `TKT-${Date.now()}`
+      
+      // Get or initialize session
+      const session = sessionService.getSession(userId)
+      if (!session.pendingTickets) {
+        session.pendingTickets = {}
+      }
+
+      // Store pending ticket
+      session.pendingTickets[ticketId] = {
+        id: ticketId,
+        content: ticketContent,
+        sourceType: sourceType,
+        createdAt: new Date().toISOString(),
+        userId: userId
+      }
+      sessionService.updateSession(userId, session)
+
+      // Create confirmation keyboard
+      const confirmationKeyboard = {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: messages.tickets.buttons.confirm, callback_data: `confirm_${ticketId}` },
+              { text: messages.tickets.buttons.cancel, callback_data: `cancel_${ticketId}` }
+            ],
+            [
+              { text: messages.tickets.buttons.edit, callback_data: `edit_${ticketId}` }
+            ]
+          ]
+        }
+      }
+
+      // Send ticket preview with confirmation buttons
+      const ticketPreview = messages.tickets.preview(ticketContent)
+
+      await bot.sendMessage(chatId, ticketPreview, {
+        ...confirmationKeyboard,
+        parse_mode: 'Markdown'
+      })
+
+      logger.info(logMessages.tickets.created(userId, ticketId))
+
+    } catch (error) {
+      logger.error(logMessages.tickets.createError(userId), error)
+      await bot.sendMessage(chatId, messages.errors.ticketCreateError)
     }
   }
 
