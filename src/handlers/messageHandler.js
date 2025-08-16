@@ -123,8 +123,8 @@ class MessageHandler {
         case 'edit':
           await this.editTicket(bot, chatId, userId, ticketId)
           break
-        case 'edittext':
-          await this.startTextEditing(bot, chatId, userId, ticketId)
+        case 'editfull':
+          await this.startFullEditing(bot, chatId, userId, ticketId)
           break
         case 'editvoice':
           await this.startVoiceEditing(bot, chatId, userId, ticketId)
@@ -220,7 +220,7 @@ class MessageHandler {
         reply_markup: {
           inline_keyboard: [
             [
-              { text: messages.tickets.buttons.editText, callback_data: `edittext_${ticketId}` },
+              { text: messages.tickets.buttons.editFull, callback_data: `editfull_${ticketId}` },
               { text: messages.tickets.buttons.editVoice, callback_data: `editvoice_${ticketId}` }
             ],
             [
@@ -463,8 +463,8 @@ class MessageHandler {
     try {
       // Check if user is in editing mode
       const session = sessionService.getSession(userId)
-      if (session.editingTicket && session.editingTicket.mode === 'text') {
-        await this.processTicketEdit(bot, chatId, userId, messageText, 'text')
+      if (session.editingTicket && (session.editingTicket.mode === 'text' || session.editingTicket.mode === 'full')) {
+        await this.processTicketEdit(bot, chatId, userId, messageText, session.editingTicket.mode)
         return
       }
 
@@ -531,8 +531,15 @@ class MessageHandler {
       await bot.sendChatAction(chatId, 'typing')
       await bot.sendMessage(chatId, messages.tickets.processing)
 
-      // Process edit instructions
-      const updatedTicket = await this.applyTicketEdits(pendingTicket.content, editText)
+      let updatedTicket
+      
+      if (inputType === 'full') {
+        // For full editing, convert the editable text back to formatted ticket
+        updatedTicket = this.convertFromEditableFormat(editText)
+      } else {
+        // For text/voice editing, apply edits to existing content
+        updatedTicket = await this.applyTicketEdits(pendingTicket.content, editText)
+      }
       
       // Update pending ticket
       pendingTicket.content = updatedTicket
@@ -707,21 +714,31 @@ class MessageHandler {
   }
 
   /**
-   * Start text editing mode
+   * Start full editing mode - shows the ticket content for complete editing
    */
-  async startTextEditing(bot, chatId, userId, ticketId) {
+  async startFullEditing(bot, chatId, userId, ticketId) {
     try {
       const session = sessionService.getSession(userId)
+      
+      // Get the current ticket content
+      const pendingTicket = session.pendingTickets?.find(t => t.id === ticketId)
+      if (!pendingTicket) {
+        await bot.sendMessage(chatId, messages.errors.ticketNotFound)
+        return
+      }
       
       if (!session.editingTicket) {
         session.editingTicket = {}
       }
       session.editingTicket.ticketId = ticketId
-      session.editingTicket.mode = 'text'
+      session.editingTicket.mode = 'full'
       sessionService.updateSession(userId, session)
 
+      // Convert ticket content to editable format
+      const editableContent = this.convertToEditableFormat(pendingTicket.content)
+      
       await bot.sendMessage(chatId, 
-        messages.tickets.textEditInstruction,
+        messages.tickets.fullEditInstruction + editableContent,
         { parse_mode: 'Markdown' }
       )
 
@@ -729,6 +746,93 @@ class MessageHandler {
       logger.error(logMessages.tickets.editError(userId, ticketId), error)
       await bot.sendMessage(chatId, messages.errors.generalError)
     }
+  }
+
+  /**
+   * Convert ticket content from formatted display to editable plain text
+   */
+  convertToEditableFormat(content) {
+    logger.info(`Converting to editable format: ${content.substring(0, 100)}...`)
+    
+    const result = content
+      .replace(/📝\s*\*\*Заголовок:\*\*\s*/gi, 'Заголовок: ')
+      .replace(/📄\s*\*\*Опис:\*\*\s*/gi, 'Опис: ')  
+      .replace(/[🔴🟡🟢⚫]\s*\*\*Пріоритет:\*\*\s*/gi, 'Пріоритет: ')
+      .replace(/👤\s*\*\*Користувач:\*\*\s*/gi, 'Користувач: ')
+      .replace(/📊\s*\*\*Категорія:\*\*\s*/gi, 'Категорія: ')
+      .replace(/💻\s*\*\*Відділ:\*\*\s*/gi, 'Відділ: ')
+      .replace(/📂\s*\*\*Категорія:\*\*\s*/gi, 'Категорія: ')
+      .replace(/🌐\s*\*\*Мова:\*\*\s*/gi, 'Мова: ')
+      .replace(/⏰\s*\*\*Створено:\*\*\s*/gi, 'Створено: ')
+      .replace(/✅\s*\*\*Статус:\*\*\s*/gi, 'Статус: ')
+      .replace(/📋\s*\*\*ID:\*\*\s*/gi, 'ID: ')
+      .replace(/\*\*/g, '') // Remove all bold formatting
+      .replace(/━+/g, '') // Remove separators
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line && !line.startsWith('🎫') && !line.startsWith('⚠️'))
+      .join('\n')
+      .trim()
+    
+    logger.info(`Converted result: ${result}`)
+    return result
+  }
+
+  /**
+   * Convert editable plain text back to formatted ticket content
+   */
+  convertFromEditableFormat(editableText) {
+    logger.info(`Converting from editable format: ${editableText}`)
+    
+    const lines = editableText.split('\n').map(line => line.trim()).filter(line => line)
+    let content = ''
+
+    // Keep the same structure as original ticket
+    for (const line of lines) {
+      const lowerLine = line.toLowerCase()
+      
+      if (lowerLine.startsWith('id:')) {
+        const id = line.substring(3).trim()
+        content += `📋 **ID:** ${id}\n`
+      } else if (lowerLine.startsWith('відділ:')) {
+        const dept = line.substring('відділ:'.length).trim()
+        content += `� **Відділ:** ${dept}\n`
+      } else if (lowerLine.startsWith('категорія:')) {
+        const category = line.substring('категорія:'.length).trim()
+        content += `� **Категорія:** ${category}\n`
+      } else if (lowerLine.startsWith('пріоритет:')) {
+        const priority = line.substring('пріоритет:'.length).trim()
+        let emoji = '🟡' // Default Medium
+        
+        if (priority.toLowerCase().includes('high') || priority.toLowerCase().includes('високий') || priority.toLowerCase().includes('высокий')) {
+          emoji = '🔴'
+        } else if (priority.toLowerCase().includes('low') || priority.toLowerCase().includes('низький') || priority.toLowerCase().includes('низкий')) {
+          emoji = '🟢'
+        } else if (priority.toLowerCase().includes('critical') || priority.toLowerCase().includes('критичний') || priority.toLowerCase().includes('критический')) {
+          emoji = '⚫'
+        }
+        
+        content += `${emoji} **Пріоритет:** ${priority}\n`
+      } else if (lowerLine.startsWith('заголовок:')) {
+        const title = line.substring('заголовок:'.length).trim()
+        content += `📝 **Заголовок:** ${title}\n`
+      } else if (lowerLine.startsWith('опис:')) {
+        const desc = line.substring('опис:'.length).trim()
+        content += `� **Опис:** ${desc}\n`
+      } else if (lowerLine.startsWith('мова:')) {
+        const lang = line.substring('мова:'.length).trim()
+        content += `🌐 **Мова:** ${lang}\n`
+      } else if (lowerLine.startsWith('створено:')) {
+        const created = line.substring('створено:'.length).trim()
+        content += `⏰ **Створено:** ${created}\n`
+      } else if (lowerLine.startsWith('статус:')) {
+        const status = line.substring('статус:'.length).trim()
+        content += `✅ **Статус:** ${status}\n`
+      }
+    }
+
+    logger.info(`Converted back to formatted content: ${content}`)
+    return content.trim()
   }
 
   /**
