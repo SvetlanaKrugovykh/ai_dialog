@@ -94,16 +94,19 @@ class LocalAIService {
     try {
       logger.info(logMessages.processing.textProcessing(clientId, text))
 
-      // In DEBUG mode, use only local parsing without external AI services
-      if (process.env.MODE === 'debug') {
-        console.log('DEBUG: Using local ticket parser only')
-        const ticket = ticketParser.parseTicket(text, clientId)
-        const formattedTicket = ticketParser.formatTicketForDisplay(ticket)
+      // ALWAYS process text through ticket parser first
+      const ticket = ticketParser.parseTicket(text, clientId)
+      const formattedTicket = ticketParser.formatTicketForDisplay(ticket)
+      logger.info(logMessages.processing.ticketParsing(clientId, text))
+      
+      // If ENABLE_LOCAL_AI is false or in DEBUG mode, return only ticket parser result
+      if (process.env.MODE === 'debug' || process.env.ENABLE_LOCAL_AI === 'false') {
+        console.log('DEBUG: Using only ticket parser result (LOCAL_AI disabled or debug mode)')
         logger.info(logMessages.processing.textResult(clientId, formattedTicket))
         return formattedTicket
       }
 
-      // In production mode, use external AI service
+      // In production mode with ENABLE_LOCAL_AI=true, also try external AI service
       const response = await axios.post(this.textProcessingUrl, {
         text: text,
         clientId: clientId,
@@ -136,16 +139,10 @@ class LocalAIService {
 
       return processedResult
     } catch (error) {
-      if (process.env.DEBUG_LEVEL !== 'info') {
-        logger.error(logMessages.services.textProcessingError, error)
-      }
-      if (error.code === 'ECONNREFUSED') {
-        throw new Error(serviceErrors.textProcessing.unavailable)
-      }
-      if (error.code === 'ETIMEDOUT') {
-        throw new Error(serviceErrors.textProcessing.timeout)
-      }
-      throw new Error(serviceErrors.textProcessing.failed)
+      // If external AI service fails, fallback to ticket parser result
+      logger.warn(`External AI service failed, using ticket parser result: ${error.message}`)
+      logger.info(logMessages.processing.textResult(clientId, formattedTicket))
+      return formattedTicket
     }
   }
 
@@ -164,18 +161,20 @@ class LocalAIService {
       // Step 1: Convert voice to text
       const { transcribedText, rawResponse } = await this.speechToTextWithDebug(voiceFilePath, clientId, segmentNumber)
 
+      // Always log full debug info to file
+      if (process.env.DEBUG_LEVEL === 'info') {
+        logger.info(`Debug - Full response for client ${clientId}: ${JSON.stringify(rawResponse, null, 2)}`)
+      }
+
+      // Send only useful message to user in Telegram
       if (process.env.DEBUG_LEVEL === 'info' && bot && chatId) {
         try {
-          await bot.sendMessage(chatId, messages.processing.debugTranscription(rawResponse, transcribedText), { parse_mode: 'Markdown' })
+          // Send only transcribed text to user, not the full JSON
+          const userMessage = messages.processing.recognizedText(transcribedText)
+          await bot.sendMessage(chatId, userMessage)
           logger.info(logMessages.debug.transcriptionSent(chatId))
         } catch (debugError) {
           logger.warn(logMessages.debug.transcriptionSendFailed, debugError)
-          // Fallback without markdown if parsing fails
-          try {
-            await bot.sendMessage(chatId, messages.processing.debugTranscriptionFallback(transcribedText))
-          } catch (fallbackError) {
-            logger.error(logMessages.debug.fallbackSendFailed, fallbackError)
-          }
         }
       }
 

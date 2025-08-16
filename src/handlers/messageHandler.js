@@ -235,21 +235,38 @@ class MessageHandler {
       const segmentNumber = session.conversationHistory.length + 1
 
       try {
-        // Process voice through local AI
-        const result = await localAIService.processVoiceMessage(tempFilePath, userId, segmentNumber, bot, chatId)
-        
-        // Save to history
-        sessionService.addToHistory(userId, 'voice_message', `[Voice message #${segmentNumber}]`)
-        sessionService.addToHistory(userId, 'ai_response', result)
+        if (process.env.ENABLE_SPEECH_TO_TEXT === 'true') {
+          // Process voice through local AI
+          const result = await localAIService.processVoiceMessage(tempFilePath, userId, segmentNumber, bot, chatId)
+          
+          // Save to history
+          sessionService.addToHistory(userId, 'voice_message', `[Voice message #${segmentNumber}]`)
+          sessionService.addToHistory(userId, 'ai_response', result)
 
-        // Send result to user
-        await bot.sendMessage(chatId, messages.processing.aiResponse(result))
+          // Send result to user
+          await bot.sendMessage(chatId, messages.processing.aiResponse(result))
+        } else {
+          // Speech-to-text is disabled - skip to fallback
+          logger.warn(logMessages.processing.speechToTextDisabled(userId))
+          
+          if (process.env.ENABLE_CHATGPT_FALLBACK === 'true') {
+            await this.fallbackToChatGPT(bot, msg, '[Voice message - Speech-to-text disabled]', 'ENABLE_SPEECH_TO_TEXT is false')
+          } else {
+            await bot.sendMessage(chatId, messages.errors.voiceProcessingError)
+          }
+        }
 
       } catch (localError) {
         logger.warn(logMessages.processing.localAIFailed(userId, localError))
         
-        // Fallback to ChatGPT if local services fail
-        await this.fallbackToChatGPT(bot, msg, '[Voice message - transcription failed]', localError.message)
+        // Check if ChatGPT fallback is enabled for voice processing
+        if (process.env.ENABLE_CHATGPT_FALLBACK === 'true') {
+          // Try ChatGPT fallback for voice message (it can't transcribe, but can process general voice message request)
+          await this.fallbackToChatGPT(bot, msg, '[Voice message - local transcription failed, processing as general voice request]', localError.message)
+        } else {
+          // Send error message without fallback
+          await bot.sendMessage(chatId, messages.errors.voiceProcessingError)
+        }
       }
 
       // Clean up temp file
@@ -276,21 +293,38 @@ class MessageHandler {
       await bot.sendChatAction(chatId, 'typing')
 
       try {
-        // Process text through local AI
-        const result = await localAIService.processTextMessage(messageText, userId)
-        
-        // Save to history
-        sessionService.addToHistory(userId, 'text_message', messageText)
-        sessionService.addToHistory(userId, 'ai_response', result)
+        if (process.env.ENABLE_LOCAL_AI === 'true') {
+          // Process text through local AI
+          const result = await localAIService.processTextMessage(messageText, userId)
+          
+          // Save to history
+          sessionService.addToHistory(userId, 'text_message', messageText)
+          sessionService.addToHistory(userId, 'ai_response', result)
 
-        // Send result to user
-        await bot.sendMessage(chatId, messages.processing.aiResponse(result))
+          // Send result to user
+          await bot.sendMessage(chatId, messages.processing.aiResponse(result))
+        } else {
+          // Local AI is disabled - skip to fallback
+          logger.warn(logMessages.processing.localAIDisabled(userId))
+          
+          if (process.env.ENABLE_CHATGPT_FALLBACK === 'true') {
+            await this.fallbackToChatGPT(bot, msg, messageText, 'ENABLE_LOCAL_AI is false')
+          } else {
+            await bot.sendMessage(chatId, messages.errors.textProcessingError)
+          }
+        }
 
       } catch (localError) {
         logger.warn(logMessages.processing.localAIFailed(userId, localError))
         
-        // Fallback to ChatGPT if local services fail
-        await this.fallbackToChatGPT(bot, msg, messageText, localError.message)
+        // Check if ChatGPT fallback is enabled
+        if (process.env.ENABLE_CHATGPT_FALLBACK === 'true') {
+          // Fallback to ChatGPT if local services fail
+          await this.fallbackToChatGPT(bot, msg, messageText, localError.message)
+        } else {
+          // Send error message without fallback
+          await bot.sendMessage(chatId, messages.errors.textProcessingError)
+        }
       }
 
     } catch (error) {
