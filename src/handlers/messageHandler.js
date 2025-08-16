@@ -110,8 +110,27 @@ class MessageHandler {
       // Acknowledge the callback query
       await bot.answerCallbackQuery(callbackQuery.id)
 
-      // Parse callback data: action_ticketId
-      const [action, ticketId] = data.split('_')
+      logger.info(`Callback query received from user ${userId}: ${data}`)
+
+      // Parse callback data - handle different formats
+      let action, ticketId
+      
+      if (data.startsWith('editfield_') || data.startsWith('setpriority_')) {
+        // For editfield_title_TKT-123 or setpriority_High_TKT-123
+        const parts = data.split('_')
+        if (parts.length >= 3) {
+          action = `${parts[0]}_${parts[1]}` // "editfield_title" or "setpriority_High"
+          ticketId = parts.slice(2).join('_') // "TKT-123" (handle IDs with dashes)
+        } else {
+          logger.warn(`Invalid callback format: ${data}`)
+          return
+        }
+      } else {
+        // For simple format: action_ticketId
+        const parts = data.split('_')
+        action = parts[0]
+        ticketId = parts.slice(1).join('_') // Handle ticket IDs with dashes
+      }
 
       switch (action) {
         case 'confirm':
@@ -133,7 +152,18 @@ class MessageHandler {
           await this.backToTicketPreview(bot, chatId, userId, ticketId)
           break
         default:
-          logger.warn(`Unknown callback action: ${action}`)
+          // Handle field editing callbacks 
+          if (action.startsWith('editfield_')) {
+            const fieldName = action.split('_')[1] // Extract field name from "editfield_title"
+            await this.startFieldEditing(bot, chatId, userId, ticketId, fieldName)
+          }
+          // Handle priority setting callbacks
+          else if (action.startsWith('setpriority_')) {
+            const priority = action.split('_')[1] // Extract priority from "setpriority_High"
+            await this.setFieldValue(bot, chatId, userId, ticketId, 'priority', priority)
+          } else {
+            logger.warn(`Unknown callback action: ${action}`)
+          }
       }
 
     } catch (error) {
@@ -463,9 +493,17 @@ class MessageHandler {
     try {
       // Check if user is in editing mode
       const session = sessionService.getSession(userId)
-      if (session.editingTicket && (session.editingTicket.mode === 'text' || session.editingTicket.mode === 'full')) {
-        await this.processTicketEdit(bot, chatId, userId, messageText, session.editingTicket.mode)
-        return
+      if (session.editingTicket) {
+        if (session.editingTicket.mode === 'text' || session.editingTicket.mode === 'full') {
+          logger.info(`User ${userId} is in editing mode: ${session.editingTicket.mode}`)
+          await this.processTicketEdit(bot, chatId, userId, messageText, session.editingTicket.mode)
+          return
+        } else if (session.editingTicket.mode.startsWith('field_')) {
+          // User is editing a specific field
+          const fieldName = session.editingTicket.fieldName
+          await this.setFieldValue(bot, chatId, userId, session.editingTicket.ticketId, fieldName, messageText)
+          return
+        }
       }
 
       // Show processing indicator
@@ -595,16 +633,22 @@ class MessageHandler {
 
       logger.info(`Lowercase edit instructions: "${lowerEdit}"`)
 
-      // Handle title changes (with Surzhyk support)
+      // Handle title changes (with Surzhyk support) - ALWAYS REPLACE
       if (lowerEdit.includes('заголовок') || lowerEdit.includes('заголовок') || 
           lowerEdit.includes('назва') || lowerEdit.includes('название') || 
           lowerEdit.includes('title') || lowerEdit.includes('тема')) {
         logger.info('Detected title change request')
-        const titleMatch = editInstructions.match(/(?:заголовок|заголовок|назва|название|title|тема)(?:\s+на)?:?\s*(.+?)(?:\n|$)/i)
-        if (titleMatch) {
-          const newTitle = titleMatch[1].trim()
+        
+        // Extract title from the edit instruction 
+        let newTitle = editInstructions
+          .replace(/змінити заголовок|заголовок|назва|название|title|тема|на/gi, '')
+          .replace(/^(що|что|то что|те що|на|:)?\s*/i, '')
+          .trim()
+        
+        if (newTitle) {
           logger.info(`Changing title to: "${newTitle}"`)
           updatedContent = updatedContent.replace(/📝\s*\*\*Заголовок:\*\*\s*[^\n]+/i, `📝 **Заголовок:** ${newTitle}`)
+          logger.info('Title successfully replaced')
         }
       }
 
@@ -617,14 +661,12 @@ class MessageHandler {
           logger.info(`Current description: "${currentDesc.substring(0, 50)}..."`)
           
           // Check if it's "add to description" or "replace description"
-          const isAddToDescription = lowerEdit.includes('додати') || lowerEdit.includes('добав') || 
-                                   lowerEdit.includes('доповн') || lowerEdit.includes('дополн') ||
-                                   lowerEdit.includes('добавить') || lowerEdit.includes('append') ||
-                                   lowerEdit.includes('add')
-          
           const isReplaceDescription = lowerEdit.includes('замін') || lowerEdit.includes('заме́н') ||
                                      lowerEdit.includes('змін') || lowerEdit.includes('перепиш') ||
                                      lowerEdit.includes('replace') || lowerEdit.includes('change')
+          
+          // By default, ADD to description unless explicitly asked to replace
+          const isAddToDescription = !isReplaceDescription
           
           // Extract the new description part from the edit instruction
           let newDescPart = editInstructions
@@ -633,22 +675,22 @@ class MessageHandler {
             .trim()
           
           if (newDescPart) {
-            if (isAddToDescription && !isReplaceDescription) {
-              // Add to existing description
+            if (isAddToDescription) {
+              // Add to existing description (DEFAULT behavior)
               const separator = currentDesc.includes('\n') ? '\n\n' : '. '
               const newFullDesc = `${currentDesc}${separator}${newDescPart}`
               updatedContent = updatedContent.replace(
                 /📄\s*\*\*Опис:\*\*\s*(.+?)(?=\n🔴|\n🟡|\n🟢|\n⚫|\n📊|$)/s,
                 `📄 **Опис:** ${newFullDesc}`
               )
-              logger.info('Description successfully extended')
+              logger.info('Description successfully extended (default)')
             } else {
-              // Replace description (default behavior or explicit replace)
+              // Replace description (only when explicitly requested)
               updatedContent = updatedContent.replace(
                 /📄\s*\*\*Опис:\*\*\s*(.+?)(?=\n🔴|\n🟡|\n🟢|\n⚫|\n📊|$)/s,
                 `📄 **Опис:** ${newDescPart}`
               )
-              logger.info('Description successfully replaced')
+              logger.info('Description successfully replaced (explicit)')
             }
           }
         }
@@ -714,14 +756,14 @@ class MessageHandler {
   }
 
   /**
-   * Start full editing mode - shows the ticket content for complete editing
+   * Start field-by-field editing mode - shows ticket with edit buttons for each field
    */
   async startFullEditing(bot, chatId, userId, ticketId) {
     try {
       const session = sessionService.getSession(userId)
       
       // Get the current ticket content
-      const pendingTicket = session.pendingTickets?.find(t => t.id === ticketId)
+      const pendingTicket = session.pendingTickets?.[ticketId]
       if (!pendingTicket) {
         await bot.sendMessage(chatId, messages.errors.ticketNotFound)
         return
@@ -731,21 +773,225 @@ class MessageHandler {
         session.editingTicket = {}
       }
       session.editingTicket.ticketId = ticketId
-      session.editingTicket.mode = 'full'
+      session.editingTicket.mode = 'fields'
       sessionService.updateSession(userId, session)
 
-      // Convert ticket content to editable format
-      const editableContent = this.convertToEditableFormat(pendingTicket.content)
-      
-      await bot.sendMessage(chatId, 
-        messages.tickets.fullEditInstruction + editableContent,
-        { parse_mode: 'Markdown' }
-      )
+      // Show ticket with field editing buttons
+      await this.showTicketWithEditButtons(bot, chatId, userId, ticketId, pendingTicket)
 
     } catch (error) {
       logger.error(logMessages.tickets.editError(userId, ticketId), error)
       await bot.sendMessage(chatId, messages.errors.generalError)
     }
+  }
+
+  /**
+   * Show ticket with buttons to edit individual fields
+   */
+  async showTicketWithEditButtons(bot, chatId, userId, ticketId, pendingTicket) {
+    // Parse current ticket fields
+    const fields = this.parseTicketFields(pendingTicket.content)
+    
+    // Create ticket display with current values
+    const ticketDisplay = `📋 **Редагування заявки по полях**\n\n` +
+      `📝 **Заголовок:** ${fields.title || 'Не вказано'}\n` +
+      `📄 **Опис:** ${fields.description || 'Не вказано'}\n` +
+      `${this.getPriorityEmoji(fields.priority)} **Пріоритет:** ${fields.priority || 'Medium'}\n` +
+      `📊 **Категорія:** ${fields.category || 'Не вказано'}\n\n` +
+      `⬇️ **Оберіть поле для редагування:**`
+
+    // Create keyboard with edit buttons for each field
+    const editFieldsKeyboard = {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: messages.tickets.buttons.editTitle, callback_data: `editfield_title_${ticketId}` },
+            { text: messages.tickets.buttons.editDescription, callback_data: `editfield_description_${ticketId}` }
+          ],
+          [
+            { text: messages.tickets.buttons.editPriority, callback_data: `editfield_priority_${ticketId}` },
+            { text: messages.tickets.buttons.editCategory, callback_data: `editfield_category_${ticketId}` }
+          ],
+          [
+            { text: messages.tickets.buttons.save, callback_data: `confirm_${ticketId}` },
+            { text: messages.tickets.buttons.cancel, callback_data: `cancel_${ticketId}` }
+          ]
+        ]
+      }
+    }
+
+    await bot.sendMessage(chatId, ticketDisplay, editFieldsKeyboard)
+  }
+
+  /**
+   * Parse ticket content to extract individual fields
+   */
+  parseTicketFields(content) {
+    const fields = {}
+    
+    // Extract title
+    const titleMatch = content.match(/📝\s*\*\*Заголовок:\*\*\s*(.+?)(?=\n|$)/i)
+    fields.title = titleMatch ? titleMatch[1].trim() : ''
+    
+    // Extract description  
+    const descMatch = content.match(/📄\s*\*\*Опис:\*\*\s*(.+?)(?=\n[🔴🟡🟢⚫]|\n📊|\n👤|$)/s)
+    fields.description = descMatch ? descMatch[1].trim() : ''
+    
+    // Extract priority
+    const priorityMatch = content.match(/[🔴🟡🟢⚫]\s*\*\*Пріоритет:\*\*\s*(.+?)(?=\n|$)/i)
+    fields.priority = priorityMatch ? priorityMatch[1].trim() : 'Medium'
+    
+    // Extract category
+    const categoryMatch = content.match(/📂\s*\*\*Категорія:\*\*\s*(.+?)(?=\n|$)/i)
+    fields.category = categoryMatch ? categoryMatch[1].trim() : ''
+    
+    return fields
+  }
+
+  /**
+   * Get priority emoji based on priority level
+   */
+  getPriorityEmoji(priority) {
+    if (!priority) return '🟡'
+    const p = priority.toLowerCase()
+    if (p.includes('high') || p.includes('високий') || p.includes('высокий')) return '🔴'
+    if (p.includes('low') || p.includes('низький') || p.includes('низкий')) return '🟢'  
+    if (p.includes('critical') || p.includes('критичний') || p.includes('критический')) return '⚫'
+    return '🟡'
+  }
+
+  /**
+   * Start editing a specific field
+   */
+  async startFieldEditing(bot, chatId, userId, ticketId, fieldName) {
+    try {
+      const session = sessionService.getSession(userId)
+      
+      if (!session.editingTicket) {
+        session.editingTicket = {}
+      }
+      session.editingTicket.ticketId = ticketId
+      session.editingTicket.mode = `field_${fieldName}`
+      session.editingTicket.fieldName = fieldName
+      sessionService.updateSession(userId, session)
+
+      // Show appropriate input prompt based on field type
+      if (fieldName === 'priority') {
+        await this.showPrioritySelection(bot, chatId, ticketId)
+      } else {
+        const instruction = messages.tickets.fieldEditInstructions[fieldName]
+        if (instruction) {
+          await bot.sendMessage(chatId, instruction, { parse_mode: 'Markdown' })
+        } else {
+          await bot.sendMessage(chatId, `✏️ Введіть нове значення для поля "${fieldName}":`)
+        }
+      }
+
+    } catch (error) {
+      logger.error(`Error starting field editing for ${fieldName}:`, error)
+      await bot.sendMessage(chatId, messages.errors.generalError)
+    }
+  }
+
+  /**
+   * Show priority selection buttons
+   */
+  async showPrioritySelection(bot, chatId, ticketId) {
+    const priorityKeyboard = {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: '🟢 Low', callback_data: `setpriority_Low_${ticketId}` },
+            { text: '🟡 Medium', callback_data: `setpriority_Medium_${ticketId}` }
+          ],
+          [
+            { text: '🔴 High', callback_data: `setpriority_High_${ticketId}` },
+            { text: '⚫ Critical', callback_data: `setpriority_Critical_${ticketId}` }
+          ],
+          [
+            { text: messages.tickets.buttons.back, callback_data: `editfull_${ticketId}` }
+          ]
+        ]
+      }
+    }
+
+    await bot.sendMessage(chatId, 
+      messages.tickets.fieldEditInstructions.priority, 
+      priorityKeyboard
+    )
+  }
+
+  /**
+   * Set the value of a specific field and return to field editing view
+   */
+  async setFieldValue(bot, chatId, userId, ticketId, fieldName, newValue) {
+    try {
+      const session = sessionService.getSession(userId)
+      const pendingTicket = session.pendingTickets?.[ticketId]
+      
+      if (!pendingTicket) {
+        await bot.sendMessage(chatId, messages.errors.ticketNotFound)
+        return
+      }
+
+      // Update the specific field in ticket content
+      const updatedContent = this.updateTicketField(pendingTicket.content, fieldName, newValue)
+      
+      // Update pending ticket
+      pendingTicket.content = updatedContent
+      pendingTicket.lastModified = new Date().toISOString()
+      session.pendingTickets[ticketId] = pendingTicket
+
+      // Reset editing mode to field selection
+      session.editingTicket.mode = 'fields'
+      sessionService.updateSession(userId, session)
+
+      // Show success message
+      await bot.sendMessage(chatId, `✅ Поле "${this.getFieldDisplayName(fieldName)}" оновлено!`)
+
+      // Return to field editing view
+      await this.showTicketWithEditButtons(bot, chatId, userId, ticketId, pendingTicket)
+
+    } catch (error) {
+      logger.error(`Error setting field ${fieldName}:`, error)
+      await bot.sendMessage(chatId, messages.errors.generalError)
+    }
+  }
+
+  /**
+   * Update a specific field in ticket content
+   */
+  updateTicketField(content, fieldName, newValue) {
+    switch (fieldName) {
+      case 'title':
+        return content.replace(/📝\s*\*\*Заголовок:\*\*\s*[^\n]+/i, `📝 **Заголовок:** ${newValue}`)
+      
+      case 'description':
+        return content.replace(/📄\s*\*\*Опис:\*\*\s*(.+?)(?=\n[🔴🟡🟢⚫]|\n📊|\n👤|$)/s, `📄 **Опис:** ${newValue}`)
+      
+      case 'priority':
+        const emoji = this.getPriorityEmoji(newValue)
+        return content.replace(/[🔴🟡🟢⚫]\s*\*\*Пріоритет:\*\*\s*[^\n]+/i, `${emoji} **Пріоритет:** ${newValue}`)
+      
+      case 'category':
+        return content.replace(/📂\s*\*\*Категорія:\*\*\s*[^\n]+/i, `📂 **Категорія:** ${newValue}`)
+      
+      default:
+        return content
+    }
+  }
+
+  /**
+   * Get display name for field
+   */
+  getFieldDisplayName(fieldName) {
+    const names = {
+      title: 'Заголовок',
+      description: 'Опис', 
+      priority: 'Пріоритет',
+      category: 'Категорія'
+    }
+    return names[fieldName] || fieldName
   }
 
   /**
