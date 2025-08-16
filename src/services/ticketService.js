@@ -66,13 +66,13 @@ class TicketService {
 
       const result = response.data
 
-      if (result.success && result.ticket_id) {
-        logger.info(`Ticket created successfully: ID ${result.ticket_id} for user ${telegramId}`)
+      if (result.success && result?.ticket?.id) {
+        logger.info(`Ticket created successfully: ID ${result.ticket.id} for user ${telegramId}`)
         return {
           success: true,
-          ticketId: result.ticket_id,
-          ticketUrl: result.ticket_url || `${this.zammadApiUrl}/#ticket/zoom/${result.ticket_id}`,
-          message: messages.tickets.created(result.ticket_id, result.ticket_url)
+          ticketId: result.ticket.id,
+          // ticketUrl: result.ticket.url || `${this.createTicketEndpoint}/#ticket/zoom/${result.ticket.id}`,
+          message: messages.tickets.created(result.ticket.id, result.ticket.url)
         }
       } else {
         throw new Error('Invalid response format from ticket creation API')
