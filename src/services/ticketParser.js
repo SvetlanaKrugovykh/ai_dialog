@@ -89,6 +89,85 @@ class TicketParser {
   }
 
   /**
+   * Validate ticket content for meaningfulness
+   * @param {string} text - input text to validate
+   * @returns {Object} - validation result {isValid: boolean, reason: string}
+   */
+  validateTicketContent(text) {
+    if (!text || typeof text !== 'string') {
+      return { isValid: false, reason: 'Порожнє повідомлення' }
+    }
+
+    const cleanText = text.trim().toLowerCase()
+    
+    // Check minimum length
+    if (cleanText.length < 5) {
+      return { isValid: false, reason: 'Занадто коротке повідомлення (мінімум 5 символів)' }
+    }
+
+    // Check for repeated characters (like "aaaaaaa", "бла-бла-бла")
+    const repeatedPattern = /(.)\1{4,}/g // 5 or more same characters in a row
+    if (repeatedPattern.test(cleanText)) {
+      return { isValid: false, reason: 'Повідомлення містить повторювані символи' }
+    }
+
+    // Check for repeated words like "бла бла бла"
+    const wordsArray = cleanText.split(/\s+/)
+    if (wordsArray.length >= 3) {
+      const uniqueWords = new Set(wordsArray)
+      if (uniqueWords.size === 1 && (uniqueWords.has('бла') || uniqueWords.has('blah') || uniqueWords.has('test'))) {
+        return { isValid: false, reason: 'Безглузде повідомлення. Опишіть вашу проблему детальніше' }
+      }
+    }
+
+    // Check for meaningless phrases
+    const meaninglessPatterns = [
+      /^(бла|бла-бла|blah|тест|test|проверка|check)$/i,
+      /^(хм|хмм|эм|эмм|ну|well|hmm|uh|ah)$/i,
+      /^(ничего|nothing|нічого|нет|no|да|yes|так)$/i,
+      /^(да нет|нет да|не знаю|не знаю что|не пойму)$/i,
+      /^(бла\s+бла|бла-бла-бла|blah\s+blah)$/i,
+      /^[.?!,\s]{3,}$/,  // Only punctuation and spaces
+      /^[0-9]{3,}$/,      // Only numbers
+      /^[a-zA-Z]{2}\1+$/i // Repeated pairs like "asasas"
+    ]
+
+    for (const pattern of meaninglessPatterns) {
+      if (pattern.test(cleanText)) {
+        return { isValid: false, reason: 'Безглузде повідомлення. Опишіть вашу проблему детальніше' }
+      }
+    }
+
+    // Check for only interjections or filler words
+    const fillerWords = ['хм', 'эм', 'ну', 'тобто', 'то есть', 'ага', 'угу', 'ок', 'ok', 'окей', 'okay']
+    const words = cleanText.split(/\s+/).filter(word => word.length > 1)
+    
+    if (words.length === 0) {
+      return { isValid: false, reason: 'Повідомлення не містить змістовних слів' }
+    }
+
+    // If all words are filler words
+    const meaningfulWords = words.filter(word => !fillerWords.includes(word))
+    if (meaningfulWords.length === 0) {
+      return { isValid: false, reason: 'Повідомлення містить тільки службові слова' }
+    }
+
+    // Check for minimum meaningful content (at least 2 meaningful words)
+    if (meaningfulWords.length < 2) {
+      return { isValid: false, reason: 'Занадто мало змістовної інформації. Додайте більше деталей' }
+    }
+
+    // Check for gibberish patterns
+    const gibberishPattern = /^[qwertyuiopasdfghjklzxcvbnm]{5,}$/i
+    if (gibberishPattern.test(cleanText.replace(/\s/g, ''))) {
+      return { isValid: false, reason: 'Схоже на випадковий набір символів' }
+    }
+
+    // All checks passed
+    return { isValid: true, reason: '' }
+  }
+
+  /**
    * Parse transcribed text and create ticket structure
    * @param {string} text - transcribed text
    * @param {string} clientId - user ID

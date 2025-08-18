@@ -3,6 +3,7 @@ const chatGPTService = require('../services/chatgpt')
 const sessionService = require('../services/session')
 const authService = require('../services/auth')
 const ticketService = require('../services/ticketService')
+const ticketParser = require('../services/ticketParser')
 const logger = require('../utils/logger')
 const messages = require('../../data/messages')
 const logMessages = require('../../data/logMessages')
@@ -1177,6 +1178,15 @@ class MessageHandler {
    */
   async createPendingTicket(bot, chatId, userId, ticketContent, sourceType) {
     try {
+      // Validate ticket content before processing
+      const validation = ticketParser.validateTicketContent(ticketContent)
+      if (!validation.isValid) {
+        logger.warn(`Ticket validation failed for user ${userId}: ${validation.reason}`)
+        
+        await bot.sendMessage(chatId, `❌ **Заявку відхилено**\n\n${validation.reason}\n\nБудь ласка, опишіть вашу проблему більш детально та конкретно.`, { parse_mode: 'Markdown' })
+        return
+      }
+
       // Generate unique ticket ID
       const ticketId = `TKT-${Date.now()}`
       
