@@ -727,8 +727,9 @@ class MessageHandler {
         }
       }
 
+      /* REMOVED: Priority editing functionality - system now auto-determines priority
       // Handle priority changes (with Surzhyk support)
-      if (messages.tickets.editKeywords.priority.some(keyword => lowerEdit.includes(keyword))) {
+      if (messages.tickets.editKeywords.priority && messages.tickets.editKeywords.priority.some(keyword => lowerEdit.includes(keyword))) {
         logger.info('Detected priority change request')
         let newPriority = 'Medium'
         let priorityEmoji = '🟡'
@@ -769,6 +770,7 @@ class MessageHandler {
           logger.warn('Failed to replace priority line')
         }
       }
+      */
 
       // Log final result
       if (updatedContent === originalContent) {
