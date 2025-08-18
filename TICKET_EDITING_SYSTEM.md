@@ -1,108 +1,109 @@
-# Система редактирования заявок по полям
+# Field-Based Ticket Editing System
 
-## Обзор системы
+## System Overview
 
-Реализована полная система редактирования заявок с возможностью изменения отдельных полей и интеграцией с Service Desk.
+A complete ticket editing system implementation with individual field modification capabilities and Service Desk integration.
 
-## Основные компоненты
+## Core Components
 
-### 1. Обработка callback-запросов (`messageHandler.js`)
+### 1. Callback Request Handling (`messageHandler.js`)
 
-- **Парсинг callback-ов**: Система обрабатывает сложные callback-запросы типа `editfield_title_TKT-123`
-- **Поддержка приоритетов**: Обработка callback-ов `setpriority_High_TKT-123`
-- **Режимы редактирования**: Поддержка полного текстового, голосового и поэлементного редактирования
+- **Callback Parsing**: System processes complex callback requests like `editfield_title_TKT-123`
+- **Priority Support**: Handles callbacks `setpriority_High_TKT-123` (removed in latest version)
+- **Editing Modes**: Supports full text, voice, and field-by-field editing modes
 
-### 2. Service Desk интеграция (`ticketService.js`)
+### 2. Service Desk Integration (`ticketService.js`)
 
-- **API интеграция**: POST запросы к `https://127.0.0.1:8001/api/create-ticket`
-- **Режимы работы**: Debug и production режимы
-- **Парсинг заявок**: Автоматическое извлечение полей из текста заявки
-- **Обработка ошибок**: Комплексная система обработки ошибок API
+- **API Integration**: POST requests to `https://127.0.0.1:8001/api/create-ticket`
+- **Operating Modes**: Debug and production modes
+- **Ticket Parsing**: Automatic field extraction from ticket text
+- **Error Handling**: Comprehensive API error handling system
 
-### 3. Интерфейс пользователя (`messages.js`)
+### 3. User Interface (`messages.js`)
 
-- **Украинский интерфейс**: Полная локализация на украинский язык
-- **Инструкции по полям**: Специфические инструкции для каждого поля
-- **Сообщения об успехе/ошибках**: Информативные сообщения для пользователя
+- **Ukrainian Interface**: Complete Ukrainian language localization
+- **Field Instructions**: Specific instructions for each field type
+- **Success/Error Messages**: Informative user feedback messages
 
-## Алгоритм работы
+## Workflow Algorithm
 
-### 1. Создание заявки
-1. Пользователь отправляет голосовое сообщение или текст
-2. Система обрабатывает и создает предварительную заявку
-3. Показывается превью с кнопками: ЗБЕРЕГТИ, ВІДМІНИТИ, РЕДАГУВАТИ
+### 1. Ticket Creation
+1. User sends voice message or text
+2. System processes and creates pending ticket
+3. Preview shown with buttons: SAVE, CANCEL, EDIT
 
-### 2. Редактирование
-При нажатии "РЕДАГУВАТИ":
-1. Показываются опции: полное редактирование, голосовое, поэлементное
-2. При выборе поэлементного - показываются кнопки для каждого поля
-3. Пользователь может изменить любое поле индивидуально
+### 2. Editing Process
+When "EDIT" is pressed:
+1. Options displayed: full editing, voice, field-by-field
+2. Field-by-field selection shows buttons for each field
+3. User can modify any field individually
 
-### 3. Отправка в Service Desk
-При нажатии "ЗБЕРЕГТИ":
-1. Заявка отправляется в Service Desk через `ticketService`
-2. В debug режиме - имитируется отправка
-3. Пользователь получает подтверждение с ID заявки
+### 3. Service Desk Submission
+When "SAVE" is pressed:
+1. Ticket sent to Service Desk via `ticketService`
+2. Debug mode simulates submission
+3. User receives confirmation with ticket ID
 
-## Поддерживаемые поля
+## Supported Fields
 
-- **title**: Заголовок заявки
-- **description**: Описание проблемы
-- **priority**: Приоритет (Low/Medium/High/Critical)
-- **category**: Категория заявки
-- **urgency**: Срочность
-- **location**: Местоположение
+- **title**: Ticket title
+- **description**: Problem description
+- **urgency**: Urgency level
+- **location**: Location information
 
-## Callback структура
+*Note: Priority and category fields were removed - system now determines these automatically*
 
-- `confirm_{ticketId}` - подтверждение заявки
-- `cancel_{ticketId}` - отмена заявки  
-- `edit_{ticketId}` - начать редактирование
-- `editfull_{ticketId}` - полное текстовое редактирование
-- `editvoice_{ticketId}` - голосовое редактирование
-- `editfield_{fieldName}_{ticketId}` - редактирование конкретного поля
-- `setpriority_{priority}_{ticketId}` - установка приоритета
+## Callback Structure
 
-## Режимы работы
+- `confirm_{ticketId}` - confirm ticket
+- `cancel_{ticketId}` - cancel ticket
+- `edit_{ticketId}` - start editing
+- `editfull_{ticketId}` - full text editing
+- `editvoice_{ticketId}` - voice editing
+- `editfield_{fieldName}_{ticketId}` - edit specific field
 
-### Debug режим
-- Заявки не отправляются реально в Service Desk
-- Генерируются тестовые ID заявок
-- Логируются все действия для отладки
+## Operating Modes
 
-### Production режим
-- Реальная отправка в Service Desk
-- Обработка реальных ответов API
-- Полная интеграция с Zammad
+### Debug Mode
+- Tickets not actually sent to Service Desk
+- Test ticket IDs generated
+- All actions logged for debugging
 
-## Настройка переменных окружения
+### Production Mode
+- Real Service Desk submission
+- Real API response handling
+- Full Zammad integration
+
+## Environment Variables Configuration
 
 ```env
-# Service Desk настройки
+# Service Desk settings
 ZAMMAD_API_URL=https://127.0.0.1:8001/api
-MODE=debug  # или production
+MODE=debug  # or production
 
-# Telegram Bot настройки
+# Telegram Bot settings
 TELEGRAM_TOKEN=your_telegram_token
 
-# OpenAI настройки (опционально)
+# OpenAI settings (optional)
 OPENAI_API_KEY=your_openai_key
 ```
 
-## Логирование
+## Logging
 
-Все операции логируются с детальной информацией:
-- Создание заявок
-- Редактирование полей  
-- Отправка в Service Desk
-- Ошибки и исключения
+All operations are logged with detailed information:
 
-## Тестирование
+- Ticket creation
+- Field editing
+- Service Desk submission
+- Errors and exceptions
 
-Для тестирования системы:
-1. Запустите бота: `node src/index.js`
-2. Отправьте голосовое сообщение или текст
-3. Используйте кнопки для редактирования полей
-4. Проверьте отправку в Service Desk
+## Testing
 
-Система готова к продакшн использованию и полностью интегрирована с существующим ботом.
+To test the system:
+
+1. Start the bot: `node src/index.js`
+2. Send voice message or text
+3. Use buttons to edit fields
+4. Verify Service Desk submission
+
+The system is production-ready and fully integrated with the existing bot.

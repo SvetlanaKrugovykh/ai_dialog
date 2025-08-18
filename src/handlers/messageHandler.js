@@ -117,11 +117,11 @@ class MessageHandler {
       // Parse callback data - handle different formats
       let action, ticketId
       
-      if (data.startsWith('editfield_') || data.startsWith('setpriority_')) {
-        // For editfield_title_TKT-123 or setpriority_High_TKT-123
+      if (data.startsWith('editfield_')) {
+        // For editfield_title_TKT-123
         const parts = data.split('_')
         if (parts.length >= 3) {
-          action = `${parts[0]}_${parts[1]}` // "editfield_title" or "setpriority_High"
+          action = `${parts[0]}_${parts[1]}` // "editfield_title"
           ticketId = parts.slice(2).join('_') // "TKT-123" (handle IDs with dashes)
         } else {
           logger.warn(`Invalid callback format: ${data}`)
@@ -158,11 +158,6 @@ class MessageHandler {
           if (action.startsWith('editfield_')) {
             const fieldName = action.split('_')[1] // Extract field name from "editfield_title"
             await this.startFieldEditing(bot, chatId, userId, ticketId, fieldName)
-          }
-          // Handle priority setting callbacks
-          else if (action.startsWith('setpriority_')) {
-            const priority = action.split('_')[1] // Extract priority from "setpriority_High"
-            await this.setFieldValue(bot, chatId, userId, ticketId, 'priority', priority)
           } else {
             logger.warn(`Unknown callback action: ${action}`)
           }
@@ -485,6 +480,13 @@ class MessageHandler {
       } catch (localError) {
         logger.warn(logMessages.processing.localAIFailed(userId, localError))
         
+        // Check if this is a validation error
+        if (localError.message && localError.message.startsWith('VALIDATION_FAILED:')) {
+          const reason = localError.message.replace('VALIDATION_FAILED: ', '')
+          await bot.sendMessage(chatId, `❌ **Заявку відхилено**\n\n${reason}\n\nБудь ласка, опишіть вашу проблему більш детально та конкретно.`, { parse_mode: 'Markdown' })
+          return
+        }
+        
         // Check if ChatGPT fallback is enabled for voice processing
         if (process.env.ENABLE_CHATGPT_FALLBACK === 'true') {
           // Try ChatGPT fallback for voice message (it can't transcribe, but can process general voice message request)
@@ -558,6 +560,13 @@ class MessageHandler {
 
       } catch (localError) {
         logger.warn(logMessages.processing.localAIFailed(userId, localError))
+        
+        // Check if this is a validation error
+        if (localError.message && localError.message.startsWith('VALIDATION_FAILED:')) {
+          const reason = localError.message.replace('VALIDATION_FAILED: ', '')
+          await bot.sendMessage(chatId, `❌ **Заявку відхилено**\n\n${reason}\n\nБудь ласка, опишіть вашу проблему більш детально та конкретно.`, { parse_mode: 'Markdown' })
+          return
+        }
         
         // Check if ChatGPT fallback is enabled
         if (process.env.ENABLE_CHATGPT_FALLBACK === 'true') {
@@ -831,10 +840,6 @@ class MessageHandler {
             { text: messages.tickets.buttons.editDescription, callback_data: `editfield_description_${ticketId}` }
           ],
           [
-            { text: messages.tickets.buttons.editPriority, callback_data: `editfield_priority_${ticketId}` },
-            { text: messages.tickets.buttons.editCategory, callback_data: `editfield_category_${ticketId}` }
-          ],
-          [
             { text: messages.tickets.buttons.save, callback_data: `confirm_${ticketId}` },
             { text: messages.tickets.buttons.cancel, callback_data: `cancel_${ticketId}` }
           ]
@@ -887,6 +892,12 @@ class MessageHandler {
    */
   async startFieldEditing(bot, chatId, userId, ticketId, fieldName) {
     try {
+      // Block editing of priority and category - system determines these automatically
+      if (fieldName === 'priority' || fieldName === 'category') {
+        await bot.sendMessage(chatId, '⚠️ **Це поле не редагується**\n\nПріоритет та категорія визначаються системою автоматично на основі змісту заявки.', { parse_mode: 'Markdown' })
+        return
+      }
+
       const session = sessionService.getSession(userId)
       
       if (!session.editingTicket) {
@@ -898,15 +909,11 @@ class MessageHandler {
       sessionService.updateSession(userId, session)
 
       // Show appropriate input prompt based on field type
-      if (fieldName === 'priority') {
-        await this.showPrioritySelection(bot, chatId, ticketId)
+      const instruction = messages.tickets.fieldEditInstructions[fieldName]
+      if (instruction) {
+        await bot.sendMessage(chatId, instruction, { parse_mode: 'Markdown' })
       } else {
-        const instruction = messages.tickets.fieldEditInstructions[fieldName]
-        if (instruction) {
-          await bot.sendMessage(chatId, instruction, { parse_mode: 'Markdown' })
-        } else {
-          await bot.sendMessage(chatId, `✏️ Введіть нове значення для поля "${fieldName}":`)
-        }
+        await bot.sendMessage(chatId, `✏️ Введіть нове значення для поля "${fieldName}":`)
       }
 
     } catch (error) {
@@ -916,38 +923,16 @@ class MessageHandler {
   }
 
   /**
-   * Show priority selection buttons
-   */
-  async showPrioritySelection(bot, chatId, ticketId) {
-    const priorityKeyboard = {
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: '🟢 Low', callback_data: `setpriority_Low_${ticketId}` },
-            { text: '🟡 Medium', callback_data: `setpriority_Medium_${ticketId}` }
-          ],
-          [
-            { text: '🔴 High', callback_data: `setpriority_High_${ticketId}` },
-            { text: '⚫ Critical', callback_data: `setpriority_Critical_${ticketId}` }
-          ],
-          [
-            { text: messages.tickets.buttons.back, callback_data: `editfull_${ticketId}` }
-          ]
-        ]
-      }
-    }
-
-    await bot.sendMessage(chatId, 
-      messages.tickets.fieldEditInstructions.priority, 
-      priorityKeyboard
-    )
-  }
-
-  /**
    * Set the value of a specific field and return to field editing view
    */
   async setFieldValue(bot, chatId, userId, ticketId, fieldName, newValue) {
     try {
+      // Block editing of priority and category
+      if (fieldName === 'priority' || fieldName === 'category') {
+        await bot.sendMessage(chatId, '⚠️ **Це поле не редагується**\n\nПріоритет та категорія визначаються системою автоматично.', { parse_mode: 'Markdown' })
+        return
+      }
+
       const session = sessionService.getSession(userId)
       const pendingTicket = session.pendingTickets?.[ticketId]
       
@@ -1178,15 +1163,9 @@ class MessageHandler {
    */
   async createPendingTicket(bot, chatId, userId, ticketContent, sourceType) {
     try {
-      // Validate ticket content before processing
-      const validation = ticketParser.validateTicketContent(ticketContent)
-      if (!validation.isValid) {
-        logger.warn(`Ticket validation failed for user ${userId}: ${validation.reason}`)
-        
-        await bot.sendMessage(chatId, `❌ **Заявку відхилено**\n\n${validation.reason}\n\nБудь ласка, опишіть вашу проблему більш детально та конкретно.`, { parse_mode: 'Markdown' })
-        return
-      }
-
+      // Note: Ticket validation is now performed earlier in localAI.processText()
+      // before this function is called, so no need to validate here
+      
       // Generate unique ticket ID
       const ticketId = `TKT-${Date.now()}`
       

@@ -94,6 +94,13 @@ class LocalAIService {
     try {
       logger.info(logMessages.processing.textProcessing(clientId, text))
 
+      // VALIDATE ticket content BEFORE processing
+      const validation = ticketParser.validateTicketContent(text)
+      if (!validation.isValid) {
+        logger.warn(`Ticket validation failed for user ${clientId}: ${validation.reason}`)
+        throw new Error(`VALIDATION_FAILED: ${validation.reason}`)
+      }
+
       // ALWAYS process text through ticket parser first
       const ticket = ticketParser.parseTicket(text, clientId)
       const formattedTicket = ticketParser.formatTicketForDisplay(ticket)
@@ -139,6 +146,11 @@ class LocalAIService {
 
       return processedResult
     } catch (error) {
+      // If this is a validation error, re-throw it (don't catch it here)
+      if (error.message && error.message.startsWith('VALIDATION_FAILED:')) {
+        throw error
+      }
+      
       // If external AI service fails, fallback to ticket parser result
       logger.warn(`External AI service failed, using ticket parser result: ${error.message}`)
       logger.info(logMessages.processing.textResult(clientId, formattedTicket))

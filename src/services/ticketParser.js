@@ -126,7 +126,8 @@ class TicketParser {
       /^(хм|хмм|эм|эмм|ну|well|hmm|uh|ah)$/i,
       /^(ничего|nothing|нічого|нет|no|да|yes|так)$/i,
       /^(да нет|нет да|не знаю|не знаю что|не пойму)$/i,
-      /^(бла\s+бла|бла-бла-бла|blah\s+blah)$/i,
+      /^(бла[\s\-]*){3,}[.?!]*$/i,  // Multiple "бла" with spaces/dashes like "бла-бла-бла-бла"
+      /^(blah[\s\-]*){3,}[.?!]*$/i, // Multiple "blah" with spaces/dashes
       /^[.?!,\s]{3,}$/,  // Only punctuation and spaces
       /^[0-9]{3,}$/,      // Only numbers
       /^[a-zA-Z]{2}\1+$/i // Repeated pairs like "asasas"
