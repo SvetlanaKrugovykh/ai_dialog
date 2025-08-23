@@ -215,6 +215,32 @@ class MessageHandler {
         }
 
         logger.info(`Ticket successfully created: ${creationResult.ticketId} for user ${userId}`)
+
+        // Remove the confirmation keyboard
+        if (callbackQuery && callbackQuery.message) {
+          const chatId = callbackQuery.message.chat.id
+          const messageId = callbackQuery.message.message_id
+
+          try {
+            await bot.editMessageReplyMarkup(
+              null, // Use null to completely remove the inline keyboard
+              { chat_id: chatId, message_id: messageId }
+            )
+            logger.info(`Inline keyboard removed for message ${messageId}`)
+          } catch (error) {
+            logger.error(`Failed to remove inline keyboard for message ${messageId}:`, error)
+          }
+
+          // Confirm the callback query to avoid hanging
+          try {
+            await bot.answerCallbackQuery(callbackQuery.id)
+          } catch (error) {
+            logger.error(`Failed to answer callback query for user ${callbackQuery.from.id}:`, error)
+          }
+        } else {
+          logger.warn('Callback query or message data is missing')
+        }
+
       } else {
         // Error - show error message but keep ticket pending
         await bot.sendMessage(chatId, creationResult.message)
@@ -242,19 +268,18 @@ class MessageHandler {
 
       // Check if the ticket is already sent
       if (session.sentTickets && session.sentTickets.includes(ticketId)) {
-        logger.warn(`Ticket ${ticketId} for user ${userId} is already sent and cannot be canceled.`)
+        await bot.sendMessage(chatId, messages.errors.ticketAlreadySent)
         return
       }
 
       // Check if the ticket is already canceled
       if (session.canceledTickets && session.canceledTickets.includes(ticketId)) {
-        logger.warn(`Ticket ${ticketId} for user ${userId} is already canceled.`)
+        await bot.sendMessage(chatId, messages.errors.ticketAlreadyCancelled)
         return
       }
 
       if (session.pendingTickets) {
         delete session.pendingTickets[ticketId]
-        sessionService.updateSession(userId, session)
       }
 
       // Mark the ticket as canceled
@@ -268,12 +293,21 @@ class MessageHandler {
       logger.info(logMessages.tickets.cancelled(userId, ticketId))
 
       // Remove the confirmation keyboard after canceling
-      const lastMessageId = session.lastMessageId // Ensure the correct message ID is used
-      if (lastMessageId) {
-        await bot.editMessageReplyMarkup(
-          { reply_markup: { inline_keyboard: [] } },
-          { chat_id: chatId, message_id: lastMessageId }
-        )
+      const messageId = session.messages?.[ticketId]
+      if (messageId) {
+        try {
+          await bot.editMessageReplyMarkup(
+            { reply_markup: { inline_keyboard: [] } },
+            { chat_id: chatId, message_id: messageId }
+          )
+          logger.info(`Inline keyboard removed for message ${messageId}`)
+
+          // Clean up the saved message_id after removing the keyboard
+          delete session.messages[ticketId]
+          sessionService.updateSession(userId, session)
+        } catch (error) {
+          logger.error(`Failed to remove inline keyboard for message ${messageId}:`, error)
+        }
       } else {
         logger.warn(`No message_id found for user ${userId} to remove inline keyboard.`)
       }
@@ -1248,13 +1282,27 @@ class MessageHandler {
       // Send ticket preview with confirmation buttons
       const ticketPreview = messages.tickets.preview(ticketContent)
 
-      await bot.sendMessage(chatId, ticketPreview, {
+      const sentMessage = await bot.sendMessage(chatId, ticketPreview, {
         ...confirmationKeyboard,
         parse_mode: 'Markdown'
       })
 
-      logger.info(logMessages.tickets.created(userId, ticketId))
+      // Reuse the existing session variable to avoid redeclaration
+      if (!session.messages) {
+        session.messages = {}
+      }
 
+      // Save message_id keyed by ticketId so later operations (cancel/confirm)
+      // can remove the keyboard using the ticketId directly.
+      session.messages[ticketId] = sentMessage.message_id
+      sessionService.updateSession(userId, session)
+
+      logger.info(`Message with keyboard sent. Saved message_id: ${sentMessage.message_id} for user ${userId}`)
+      logger.debug(`Updated session data for user ${userId}: ${JSON.stringify(session)}`)
+
+      // Additional debug log for session retrieval
+      const updatedSession = sessionService.getSession(userId)
+      logger.debug(`Retrieved session data after update for user ${userId}: ${JSON.stringify(updatedSession)}`)
     } catch (error) {
       logger.error(logMessages.tickets.createError(userId), error)
       await bot.sendMessage(chatId, messages.errors.ticketCreateError)
@@ -1334,6 +1382,85 @@ class MessageHandler {
     const hours = Math.floor(uptime / 3600)
     const minutes = Math.floor((uptime % 3600) / 60)
     return `${hours}h ${minutes}m`
+  }
+
+  async sendMessageWithKeyboard(bot, chatId, userId, text, keyboard) {
+    try {
+      const sentMessage = await bot.sendMessage(chatId, text, {
+        reply_markup: { inline_keyboard: keyboard }
+      })
+
+      // Save the message_id in the session for this specific user and message
+      const session = sessionService.getSession(userId) || {}
+      if (!session.messages) {
+        session.messages = {}
+      }
+
+      // Ensure unique association of message_id with the text
+      session.messages[text] = sentMessage.message_id
+      sessionService.updateSession(userId, session)
+
+      logger.info(`Message with keyboard sent. Saved message_id: ${sentMessage.message_id} for user ${userId}`)
+    } catch (error) {
+      logger.error(`Failed to send message with keyboard:`, error)
+    }
+  }
+
+  async removeKeyboard(bot, callbackQuery) {
+    if (!(callbackQuery && callbackQuery.message)) {
+      logger.warn('Callback query or message data is missing')
+      return
+    }
+
+    const chatId = callbackQuery.message.chat.id
+    const userId = callbackQuery.from.id.toString()
+    const session = sessionService.getSession(userId)
+
+    // Try to extract ticketId from callback data (format: action_ticketId or editfield_...)
+    let ticketId = null
+    if (callbackQuery.data) {
+      const parts = callbackQuery.data.split('_')
+      if (parts.length >= 2) {
+        ticketId = parts.slice(1).join('_')
+      }
+    }
+
+    let messageId = null
+    if (ticketId && session && session.messages && session.messages[ticketId]) {
+      messageId = session.messages[ticketId]
+    } else if (session && session.messages && callbackQuery.message.text) {
+      // Fallback for messages stored by full text
+      messageId = session.messages[callbackQuery.message.text]
+    }
+
+    if (messageId) {
+      try {
+        await bot.editMessageReplyMarkup(
+          null,
+          { chat_id: chatId, message_id: messageId }
+        )
+        logger.info(`Inline keyboard removed for message ${messageId} of user ${userId}`)
+
+        // Clean up the saved message_id after removing the keyboard
+        if (ticketId && session && session.messages && session.messages[ticketId]) {
+          delete session.messages[ticketId]
+        } else if (callbackQuery.message.text && session && session.messages && session.messages[callbackQuery.message.text]) {
+          delete session.messages[callbackQuery.message.text]
+        }
+        sessionService.updateSession(userId, session)
+      } catch (error) {
+        logger.error(`Failed to remove inline keyboard for message ${messageId} of user ${userId}:`, error)
+      }
+    } else {
+      logger.warn(`No message_id found for user ${userId} to remove inline keyboard. Session messages: ${JSON.stringify(session?.messages)}`)
+    }
+
+    // Confirm the callback query to avoid hanging
+    try {
+      await bot.answerCallbackQuery(callbackQuery.id)
+    } catch (error) {
+      logger.error(`Failed to answer callback query for user ${userId}:`, error)
+    }
   }
 }
 

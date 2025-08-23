@@ -108,6 +108,37 @@ class SessionService {
       logger.info(`Cleaned up ${cleaned} inactive sessions`)
     }
   }
+
+  /**
+   * Saves message_id for a given message text in the session
+   * @param {string} userId - user ID
+   * @param {string} messageText - message text
+   * @param {string} messageId - message ID
+   */
+  saveMessageId(userId, messageText, messageId) {
+    const session = this.getSession(userId) || {}
+    if (!session.messages) {
+      session.messages = {}
+    }
+    session.messages[messageText] = messageId
+    this.updateSession(userId, session)
+    logger.info(`Saved message_id: ${messageId} for user ${userId}`)
+  }
+
+  /**
+   * Retrieves message_id for a given message text from the session
+   * @param {string} userId - user ID
+   * @param {string} messageText - message text
+   * @returns {string|null} - message ID or null if not found
+   */
+  getMessageId(userId, messageText) {
+    const session = this.getSession(userId)
+    if (session && session.messages) {
+      return session.messages[messageText]
+    }
+    logger.warn(`No message_id found for user ${userId} and message: ${messageText}`)
+    return null
+  }
 }
 
 module.exports = new SessionService()
