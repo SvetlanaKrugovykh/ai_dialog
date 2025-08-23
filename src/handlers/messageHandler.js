@@ -216,29 +216,21 @@ class MessageHandler {
 
         logger.info(`Ticket successfully created: ${creationResult.ticketId} for user ${userId}`)
 
-        // Remove the confirmation keyboard
-        if (callbackQuery && callbackQuery.message) {
-          const chatId = callbackQuery.message.chat.id
-          const messageId = callbackQuery.message.message_id
-
-          try {
-            await bot.editMessageReplyMarkup(
-              null, // Use null to completely remove the inline keyboard
-              { chat_id: chatId, message_id: messageId }
-            )
+        // Remove the confirmation keyboard using stored message_id keyed by ticketId
+        try {
+          const messageId = session.messages?.[ticketId]
+          if (messageId) {
+            await bot.editMessageReplyMarkup(null, { chat_id: chatId, message_id: messageId })
             logger.info(`Inline keyboard removed for message ${messageId}`)
-          } catch (error) {
-            logger.error(`Failed to remove inline keyboard for message ${messageId}:`, error)
-          }
 
-          // Confirm the callback query to avoid hanging
-          try {
-            await bot.answerCallbackQuery(callbackQuery.id)
-          } catch (error) {
-            logger.error(`Failed to answer callback query for user ${callbackQuery.from.id}:`, error)
+            // Clean up stored message_id
+            delete session.messages[ticketId]
+            sessionService.updateSession(userId, session)
+          } else {
+            logger.warn(`No stored message_id for ticket ${ticketId} of user ${userId}`)
           }
-        } else {
-          logger.warn('Callback query or message data is missing')
+        } catch (error) {
+          logger.error(`Failed to remove inline keyboard for ticket ${ticketId}:`, error)
         }
 
       } else {
