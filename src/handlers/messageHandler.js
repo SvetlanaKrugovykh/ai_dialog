@@ -79,15 +79,15 @@ class MessageHandler {
         sessionService.updateSession(userId, session)
       }
 
-      // Handle voice messages
-      if (msg.voice) {
-        await this.handleVoiceMessage(bot, msg)
+      // Enforce voice-only input
+      if (!msg.voice) {
+        await bot.sendMessage(chatId, messages.errors.onlyVoiceAllowed)
         return
       }
 
-      // Handle text messages
-      if (msg.text) {
-        await this.handleTextMessage(bot, msg)
+      // Handle voice messages
+      if (msg.voice) {
+        await this.handleVoiceMessage(bot, msg)
         return
       }
 
