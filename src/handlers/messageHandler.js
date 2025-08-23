@@ -1200,9 +1200,9 @@ class MessageHandler {
               { text: messages.tickets.buttons.confirm, callback_data: `confirm_${ticketId}` },
               { text: messages.tickets.buttons.cancel, callback_data: `cancel_${ticketId}` }
             ],
-            [
-              { text: messages.tickets.buttons.edit, callback_data: `edit_${ticketId}` }
-            ]
+            // [
+            //   { text: messages.tickets.buttons.edit, callback_data: `edit_${ticketId}` }
+            // ]
           ]
         }
       }
