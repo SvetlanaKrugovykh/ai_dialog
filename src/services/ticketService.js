@@ -142,18 +142,12 @@ class TicketService {
    * @returns {string} - formatted body for Zammad
    */
   formatTicketBody(originalContent, parsedFields) {
-    // Include the full formatted content for visual appeal
-    let body = originalContent
-
-    // Add separator and clean structured data
-    body += '\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'
+    // Minimal structured body to send to Service Desk (avoid duplicating full preview)
+    let body = ''
     body += '📋 СТРУКТУРОВАНА ІНФОРМАЦІЯ:\n\n'
     body += `📝 Заголовок: ${parsedFields.title}\n`
     body += `📄 Опис: ${parsedFields.description}\n`
-    body += `🔧 Пріоритет: ${parsedFields.priority}\n`
     body += `💼 Відділ: ${parsedFields.department}\n`
-    body += `📂 Категорія: ${parsedFields.category}\n`
-    body += `🌐 Мова: ${parsedFields.language}\n`
     body += `🤖 Створено через: AI Dialog Bot\n`
 
     return body
