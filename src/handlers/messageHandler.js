@@ -21,6 +21,7 @@ class MessageHandler {
     }
     this.tempDir = path.join(__dirname, '../../temp')
     this.ensureTempDir()
+    this.authCache = new Map()
   }
 
   ensureTempDir() {
@@ -38,14 +39,14 @@ class MessageHandler {
     try {
       const chatId = msg.chat?.id || msg.callback_query?.message?.chat?.id
       const userId = msg.from?.id?.toString() || msg.callback_query?.from?.id?.toString()
-      
+
       // Handle callback queries from inline keyboards first
       if (msg.callback_query) {
         logger.info(`Callback query received from user ${userId}: ${msg.callback_query.data}`)
         await this.handleCallbackQuery(bot, msg.callback_query)
         return
       }
-      
+
       logger.info(logMessages.messages.received(userId, msg.voice ? 'voice' : 'text'))
 
       // Check if message is a command - handle authentication in command handlers
@@ -55,14 +56,18 @@ class MessageHandler {
       }
 
       // For non-command messages, check authentication here
-      const authResult = await authService.authorizeUser(userId)
-      
+      if (!this.authCache.has(userId)) {
+        const authResult = await authService.authorizeUser(userId)
+        this.authCache.set(userId, authResult)
+      }
+      const authResult = this.authCache.get(userId)
+
       if (!authResult.allowed) {
         await bot.sendMessage(chatId, authResult.message)
         logger.warn(logMessages.messages.accessDenied(userId))
         return
       }
-      
+
       // Send welcome/warning message for first interaction (non-commands only)
       const session = sessionService.getSession(userId)
       if (!session.authenticated) {
@@ -73,7 +78,7 @@ class MessageHandler {
         }
         sessionService.updateSession(userId, session)
       }
-      
+
       // Handle voice messages
       if (msg.voice) {
         await this.handleVoiceMessage(bot, msg)
@@ -116,7 +121,7 @@ class MessageHandler {
 
       // Parse callback data - handle different formats
       let action, ticketId
-      
+
       if (data.startsWith('editfield_')) {
         // For editfield_title_TKT-123
         const parts = data.split('_')
@@ -196,7 +201,7 @@ class MessageHandler {
       if (creationResult.success) {
         // Success - send confirmation with ticket ID
         await bot.sendMessage(chatId, creationResult.message)
-        
+
         // Remove from pending tickets
         if (session.pendingTickets) {
           delete session.pendingTickets[ticketId]
@@ -208,7 +213,7 @@ class MessageHandler {
         // Error - show error message but keep ticket pending
         await bot.sendMessage(chatId, creationResult.message)
         logger.error(`Failed to create ticket for user ${userId}: ${creationResult.error}`)
-        
+
         // In debug mode, still remove the ticket to avoid accumulation
         if (ticketService.getMode() === 'debug' && session.pendingTickets) {
           delete session.pendingTickets[ticketId]
@@ -228,7 +233,7 @@ class MessageHandler {
   async cancelTicket(bot, chatId, userId, ticketId) {
     try {
       const session = sessionService.getSession(userId)
-      
+
       if (session.pendingTickets) {
         delete session.pendingTickets[ticketId]
         sessionService.updateSession(userId, session)
@@ -310,16 +315,16 @@ class MessageHandler {
   async handleStart(bot, msg) {
     const chatId = msg.chat.id
     const userId = msg.from.id.toString()
-    
+
     // Check user authentication for /start command
     const authResult = await authService.authorizeUser(userId)
-    
+
     if (!authResult.allowed) {
       await bot.sendMessage(chatId, authResult.message)
       logger.warn(logMessages.messages.accessDeniedStart(userId))
       return
     }
-    
+
     // Clear session and set authentication info
     sessionService.clearSession(userId)
     const session = sessionService.getSession(userId)
@@ -328,10 +333,10 @@ class MessageHandler {
       session.userInfo = authResult.user
     }
     sessionService.updateSession(userId, session)
-    
+
     // Send auth message only once
     await bot.sendMessage(chatId, authResult.message)
-    
+
     // Get bot info and send welcome message
     const botInfo = await bot.getMe()
     await bot.sendMessage(chatId, messages.bot.ready(botInfo.first_name || botInfo.username))
@@ -344,26 +349,26 @@ class MessageHandler {
   async handleHelp(bot, msg) {
     const chatId = msg.chat.id
     const userId = msg.from.id.toString()
-    
+
     // Check authentication for help command
     const authResult = await authService.authorizeUser(userId)
-    
+
     if (!authResult.allowed) {
       await bot.sendMessage(chatId, authResult.message)
       return
     }
-    
+
     const session = sessionService.getSession(userId)
-    
+
     let userInfo = ''
     if (session.userInfo) {
       userInfo = messages.bot.helpHeader(
-        session.userInfo.firstname, 
-        session.userInfo.lastname, 
+        session.userInfo.firstname,
+        session.userInfo.lastname,
         session.userInfo.email
       )
     }
-    
+
     const helpMessage = userInfo + messages.bot.helpMessage(authService.getMode())
 
     await bot.sendMessage(chatId, helpMessage)
@@ -375,19 +380,19 @@ class MessageHandler {
   async handleHealth(bot, msg) {
     const chatId = msg.chat.id
     const userId = msg.from.id.toString()
-    
+
     // Check authentication for health command
     const authResult = await authService.authorizeUser(userId)
-    
+
     if (!authResult.allowed) {
       await bot.sendMessage(chatId, authResult.message)
       return
     }
-    
+
     try {
       const servicesStatus = await localAIService.checkServicesHealth()
       const allOnline = servicesStatus.speechToText && servicesStatus.textProcessing
-      
+
       const statusMessage = messages.bot.healthStatus(
         servicesStatus.speechToText,
         servicesStatus.textProcessing,
@@ -419,11 +424,11 @@ class MessageHandler {
       const fileId = msg.voice.file_id
       const file = await bot.getFile(fileId)
       const fileUrl = `https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${file.file_path}`
-      
+
       // Save voice file temporarily
       const tempFileName = `voice_${userId}_${Date.now()}.oga`
       const tempFilePath = path.join(this.tempDir, tempFileName)
-      
+
       const response = await require('axios').get(fileUrl, { responseType: 'stream' })
       const writer = fs.createWriteStream(tempFilePath)
       response.data.pipe(writer)
@@ -443,7 +448,7 @@ class MessageHandler {
         } else {
           await bot.sendMessage(chatId, messages.errors.voiceProcessingError)
         }
-        
+
         // Clean up temp file
         fs.unlink(tempFilePath, (err) => {
           if (err) logger.warn(logMessages.files.tempFileDeleteFailed, err)
@@ -458,7 +463,7 @@ class MessageHandler {
         if (process.env.ENABLE_SPEECH_TO_TEXT === 'true') {
           // Process voice through local AI
           const result = await localAIService.processVoiceMessage(tempFilePath, userId, segmentNumber, bot, chatId)
-          
+
           // Save to history
           sessionService.addToHistory(userId, 'voice_message', `[Voice message #${segmentNumber}]`)
           sessionService.addToHistory(userId, 'ai_response', result)
@@ -469,7 +474,7 @@ class MessageHandler {
         } else {
           // Speech-to-text is disabled - skip to fallback
           logger.warn(logMessages.processing.speechToTextDisabled(userId))
-          
+
           if (process.env.ENABLE_CHATGPT_FALLBACK === 'true') {
             await this.fallbackToChatGPT(bot, msg, '[Voice message - Speech-to-text disabled]', 'ENABLE_SPEECH_TO_TEXT is false')
           } else {
@@ -479,14 +484,14 @@ class MessageHandler {
 
       } catch (localError) {
         logger.warn(logMessages.processing.localAIFailed(userId, localError))
-        
+
         // Check if this is a validation error
         if (localError.message && localError.message.startsWith('VALIDATION_FAILED:')) {
           const reason = localError.message.replace('VALIDATION_FAILED: ', '')
           await bot.sendMessage(chatId, `❌ **Заявку відхилено**\n\n${reason}\n\nБудь ласка, опишіть вашу проблему більш детально та конкретно.`, { parse_mode: 'Markdown' })
           return
         }
-        
+
         // Check if ChatGPT fallback is enabled for voice processing
         if (process.env.ENABLE_CHATGPT_FALLBACK === 'true') {
           // Try ChatGPT fallback for voice message (it can't transcribe, but can process general voice message request)
@@ -539,7 +544,7 @@ class MessageHandler {
         if (process.env.ENABLE_LOCAL_AI === 'true') {
           // Process text through local AI
           const result = await localAIService.processTextMessage(messageText, userId)
-          
+
           // Save to history
           sessionService.addToHistory(userId, 'text_message', messageText)
           sessionService.addToHistory(userId, 'ai_response', result)
@@ -550,7 +555,7 @@ class MessageHandler {
         } else {
           // Local AI is disabled - skip to fallback
           logger.warn(logMessages.processing.localAIDisabled(userId))
-          
+
           if (process.env.ENABLE_CHATGPT_FALLBACK === 'true') {
             await this.fallbackToChatGPT(bot, msg, messageText, 'ENABLE_LOCAL_AI is false')
           } else {
@@ -560,14 +565,14 @@ class MessageHandler {
 
       } catch (localError) {
         logger.warn(logMessages.processing.localAIFailed(userId, localError))
-        
+
         // Check if this is a validation error
         if (localError.message && localError.message.startsWith('VALIDATION_FAILED:')) {
           const reason = localError.message.replace('VALIDATION_FAILED: ', '')
           await bot.sendMessage(chatId, `❌ **Заявку відхилено**\n\n${reason}\n\nБудь ласка, опишіть вашу проблему більш детально та конкретно.`, { parse_mode: 'Markdown' })
           return
         }
-        
+
         // Check if ChatGPT fallback is enabled
         if (process.env.ENABLE_CHATGPT_FALLBACK === 'true') {
           // Fallback to ChatGPT if local services fail
@@ -603,7 +608,7 @@ class MessageHandler {
       await bot.sendMessage(chatId, messages.tickets.processing)
 
       let updatedTicket
-      
+
       if (inputType === 'full') {
         // For full editing, convert the editable text back to formatted ticket
         updatedTicket = this.convertFromEditableFormat(editText)
@@ -611,7 +616,7 @@ class MessageHandler {
         // For text/voice editing, apply edits to existing content
         updatedTicket = await this.applyTicketEdits(pendingTicket.content, editText)
       }
-      
+
       // Update pending ticket
       pendingTicket.content = updatedTicket
       pendingTicket.lastModified = new Date().toISOString()
@@ -658,9 +663,9 @@ class MessageHandler {
     try {
       // Simple keyword-based editing logic
       // In production, this could use AI to understand natural language editing instructions
-      
+
       logger.info(`Applying edits: "${editInstructions}" to content length ${originalContent.length}`)
-      
+
       let updatedContent = originalContent
       const lowerEdit = editInstructions.toLowerCase()
 
@@ -669,13 +674,13 @@ class MessageHandler {
       // Handle title changes (with Surzhyk support) - ALWAYS REPLACE
       if (messages.tickets.editKeywords.title.some(keyword => lowerEdit.includes(keyword))) {
         logger.info('Detected title change request')
-        
+
         // Extract title from the edit instruction 
         let newTitle = editInstructions
           .replace(/змінити заголовок|заголовок|назва|название|title|тема|на/gi, '')
-          .replace(/^(що|что|то что|те що|на|:)?\s*/i, '')
+          .replace(/^(що|что|то що|те що|на|:)?\s*/i, '')
           .trim()
-        
+
         if (newTitle) {
           logger.info(`Changing title to: "${newTitle}"`)
           updatedContent = updatedContent.replace(/📝\s*\*\*Заголовок:\*\*\s*[^\n]+/i, `📝 **Заголовок:** ${newTitle}`)
@@ -690,21 +695,21 @@ class MessageHandler {
         if (descMatch) {
           const currentDesc = descMatch[1].trim()
           logger.info(`Current description: "${currentDesc.substring(0, 50)}..."`)
-          
+
           // Check if it's "add to description" or "replace description"
           const isReplaceDescription = lowerEdit.includes('замін') || lowerEdit.includes('заме́н') ||
-                                     lowerEdit.includes('змін') || lowerEdit.includes('перепиш') ||
-                                     lowerEdit.includes('replace') || lowerEdit.includes('change')
-          
+            lowerEdit.includes('змін') || lowerEdit.includes('перепиш') ||
+            lowerEdit.includes('replace') || lowerEdit.includes('change')
+
           // By default, ADD to description unless explicitly asked to replace
           const isAddToDescription = !isReplaceDescription
-          
+
           // Extract the new description part from the edit instruction
           let newDescPart = editInstructions
             .replace(/додати до опису|додати в опис|змінити опис|замінити опис|опис проблеми|опис|description|додати|добавить|доповнити|заменить|замінити|дополнить|изменить/gi, '')
-            .replace(/^(що|что|то что|те що|на|:)?\s*/i, '')
+            .replace(/^(що|что|то що|те що|на|:)?\s*/i, '')
             .trim()
-          
+
           if (newDescPart) {
             if (isAddToDescription) {
               // Add to existing description (DEFAULT behavior)
@@ -794,14 +799,14 @@ class MessageHandler {
   async startFullEditing(bot, chatId, userId, ticketId) {
     try {
       const session = sessionService.getSession(userId)
-      
+
       // Get the current ticket content
       const pendingTicket = session.pendingTickets?.[ticketId]
       if (!pendingTicket) {
         await bot.sendMessage(chatId, messages.errors.ticketNotFound)
         return
       }
-      
+
       if (!session.editingTicket) {
         session.editingTicket = {}
       }
@@ -824,7 +829,7 @@ class MessageHandler {
   async showTicketWithEditButtons(bot, chatId, userId, ticketId, pendingTicket) {
     // Parse current ticket fields
     const fields = this.parseTicketFields(pendingTicket.content)
-    
+
     // Create ticket display with current values
     const ticketDisplay = `📋 **Редагування заявки по полях**\n\n` +
       `📝 **Заголовок:** ${fields.title || 'Не вказано'}\n` +
@@ -857,23 +862,23 @@ class MessageHandler {
    */
   parseTicketFields(content) {
     const fields = {}
-    
+
     // Extract title
     const titleMatch = content.match(/📝\s*\*\*Заголовок:\*\*\s*(.+?)(?=\n|$)/i)
     fields.title = titleMatch ? titleMatch[1].trim() : ''
-    
+
     // Extract description  
     const descMatch = content.match(/📄\s*\*\*Опис:\*\*\s*(.+?)(?=\n[🔴🟡🟢⚫]|\n📊|\n👤|$)/s)
     fields.description = descMatch ? descMatch[1].trim() : ''
-    
+
     // Extract priority
     const priorityMatch = content.match(/[🔴🟡🟢⚫]\s*\*\*Пріоритет:\*\*\s*(.+?)(?=\n|$)/i)
     fields.priority = priorityMatch ? priorityMatch[1].trim() : 'Medium'
-    
+
     // Extract category
     const categoryMatch = content.match(/📂\s*\*\*Категорія:\*\*\s*(.+?)(?=\n|$)/i)
     fields.category = categoryMatch ? categoryMatch[1].trim() : ''
-    
+
     return fields
   }
 
@@ -884,7 +889,7 @@ class MessageHandler {
     if (!priority) return '🟡'
     const p = priority.toLowerCase()
     if (p.includes('high') || p.includes('високий') || p.includes('высокий')) return '🔴'
-    if (p.includes('low') || p.includes('низький') || p.includes('низкий')) return '🟢'  
+    if (p.includes('low') || p.includes('низький') || p.includes('низкий')) return '🟢'
     if (p.includes('critical') || p.includes('критичний') || p.includes('критический')) return '⚫'
     return '🟡'
   }
@@ -901,7 +906,7 @@ class MessageHandler {
       }
 
       const session = sessionService.getSession(userId)
-      
+
       if (!session.editingTicket) {
         session.editingTicket = {}
       }
@@ -937,7 +942,7 @@ class MessageHandler {
 
       const session = sessionService.getSession(userId)
       const pendingTicket = session.pendingTickets?.[ticketId]
-      
+
       if (!pendingTicket) {
         await bot.sendMessage(chatId, messages.errors.ticketNotFound)
         return
@@ -945,7 +950,7 @@ class MessageHandler {
 
       // Update the specific field in ticket content
       const updatedContent = this.updateTicketField(pendingTicket.content, fieldName, newValue)
-      
+
       // Update pending ticket
       pendingTicket.content = updatedContent
       pendingTicket.lastModified = new Date().toISOString()
@@ -974,17 +979,17 @@ class MessageHandler {
     switch (fieldName) {
       case 'title':
         return content.replace(/📝\s*\*\*Заголовок:\*\*\s*[^\n]+/i, `📝 **Заголовок:** ${newValue}`)
-      
+
       case 'description':
         return content.replace(/📄\s*\*\*Опис:\*\*\s*(.+?)(?=\n[🔴🟡🟢⚫]|\n📊|\n👤|$)/s, `📄 **Опис:** ${newValue}`)
-      
+
       case 'priority':
         const emoji = this.getPriorityEmoji(newValue)
         return content.replace(/[🔴🟡🟢⚫]\s*\*\*Пріоритет:\*\*\s*[^\n]+/i, `${emoji} **Пріоритет:** ${newValue}`)
-      
+
       case 'category':
         return content.replace(/📂\s*\*\*Категорія:\*\*\s*[^\n]+/i, `📂 **Категорія:** ${newValue}`)
-      
+
       default:
         return content
     }
@@ -996,7 +1001,7 @@ class MessageHandler {
   getFieldDisplayName(fieldName) {
     const names = {
       title: 'Заголовок',
-      description: 'Опис', 
+      description: 'Опис',
       priority: 'Пріоритет',
       category: 'Категорія'
     }
@@ -1008,10 +1013,10 @@ class MessageHandler {
    */
   convertToEditableFormat(content) {
     logger.info(`Converting to editable format: ${content.substring(0, 100)}...`)
-    
+
     const result = content
       .replace(/📝\s*\*\*Заголовок:\*\*\s*/gi, 'Заголовок: ')
-      .replace(/📄\s*\*\*Опис:\*\*\s*/gi, 'Опис: ')  
+      .replace(/📄\s*\*\*Опис:\*\*\s*/gi, 'Опис: ')
       .replace(/[🔴🟡🟢⚫]\s*\*\*Пріоритет:\*\*\s*/gi, 'Пріоритет: ')
       .replace(/👤\s*\*\*Користувач:\*\*\s*/gi, 'Користувач: ')
       .replace(/📊\s*\*\*Категорія:\*\*\s*/gi, 'Категорія: ')
@@ -1028,7 +1033,7 @@ class MessageHandler {
       .filter(line => line && !line.startsWith('🎫') && !line.startsWith('⚠️'))
       .join('\n')
       .trim()
-    
+
     logger.info(`Converted result: ${result}`)
     return result
   }
@@ -1038,14 +1043,14 @@ class MessageHandler {
    */
   convertFromEditableFormat(editableText) {
     logger.info(`Converting from editable format: ${editableText}`)
-    
+
     const lines = editableText.split('\n').map(line => line.trim()).filter(line => line)
     let content = ''
 
     // Keep the same structure as original ticket
     for (const line of lines) {
       const lowerLine = line.toLowerCase()
-      
+
       if (lowerLine.startsWith('id:')) {
         const id = line.substring(3).trim()
         content += `📋 **ID:** ${id}\n`
@@ -1058,7 +1063,7 @@ class MessageHandler {
       } else if (lowerLine.startsWith('пріоритет:')) {
         const priority = line.substring('пріоритет:'.length).trim()
         let emoji = '🟡' // Default Medium
-        
+
         if (priority.toLowerCase().includes('high') || priority.toLowerCase().includes('високий') || priority.toLowerCase().includes('высокий')) {
           emoji = '🔴'
         } else if (priority.toLowerCase().includes('low') || priority.toLowerCase().includes('низький') || priority.toLowerCase().includes('низкий')) {
@@ -1066,7 +1071,7 @@ class MessageHandler {
         } else if (priority.toLowerCase().includes('critical') || priority.toLowerCase().includes('критичний') || priority.toLowerCase().includes('критический')) {
           emoji = '⚫'
         }
-        
+
         content += `${emoji} **Пріоритет:** ${priority}\n`
       } else if (lowerLine.startsWith('заголовок:')) {
         const title = line.substring('заголовок:'.length).trim()
@@ -1096,7 +1101,7 @@ class MessageHandler {
   async startVoiceEditing(bot, chatId, userId, ticketId) {
     try {
       const session = sessionService.getSession(userId)
-      
+
       if (!session.editingTicket) {
         session.editingTicket = {}
       }
@@ -1104,7 +1109,7 @@ class MessageHandler {
       session.editingTicket.mode = 'voice'
       sessionService.updateSession(userId, session)
 
-      await bot.sendMessage(chatId, 
+      await bot.sendMessage(chatId,
         messages.tickets.voiceEditInstruction,
         { parse_mode: 'Markdown' }
       )
@@ -1167,10 +1172,10 @@ class MessageHandler {
     try {
       // Note: Ticket validation is now performed earlier in localAI.processText()
       // before this function is called, so no need to validate here
-      
+
       // Generate unique ticket ID
       const ticketId = `TKT-${Date.now()}`
-      
+
       // Get or initialize session
       const session = sessionService.getSession(userId)
       if (!session.pendingTickets) {
@@ -1227,13 +1232,13 @@ class MessageHandler {
 
     try {
       await bot.sendMessage(chatId, messages.processing.localAIFallback(localError))
-      
+
       // Use ChatGPT as fallback
       const gptResponse = await chatGPTService.processQuestion(originalMessage, userId)
-      
+
       // Save to history
       sessionService.addToHistory(userId, 'chatgpt_fallback', gptResponse)
-      
+
       await bot.sendMessage(chatId, messages.processing.chatgptResponse(gptResponse))
 
     } catch (gptError) {
@@ -1248,15 +1253,15 @@ class MessageHandler {
   async handleClear(bot, msg) {
     const chatId = msg.chat.id
     const userId = msg.from.id.toString()
-    
+
     // Check authentication for clear command
     const authResult = await authService.authorizeUser(userId)
-    
+
     if (!authResult.allowed) {
       await bot.sendMessage(chatId, authResult.message)
       return
     }
-    
+
     sessionService.clearSession(userId)
     await bot.sendMessage(chatId, messages.success.historyCleared)
   }
@@ -1267,15 +1272,15 @@ class MessageHandler {
   async handleStats(bot, msg) {
     const chatId = msg.chat.id
     const userId = msg.from.id.toString()
-    
+
     // Check authentication for stats command
     const authResult = await authService.authorizeUser(userId)
-    
+
     if (!authResult.allowed) {
       await bot.sendMessage(chatId, authResult.message)
       return
     }
-    
+
     const stats = sessionService.getStats()
     const statsMessage = messages.bot.statsMessage(
       stats.totalSessions,
