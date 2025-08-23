@@ -202,6 +202,12 @@ class MessageHandler {
         // Success - send confirmation with ticket ID
         await bot.sendMessage(chatId, creationResult.message)
 
+        // Mark the ticket as sent
+        if (!session.sentTickets) {
+          session.sentTickets = []
+        }
+        session.sentTickets.push(ticketId)
+
         // Remove from pending tickets
         if (session.pendingTickets) {
           delete session.pendingTickets[ticketId]
@@ -234,17 +240,49 @@ class MessageHandler {
     try {
       const session = sessionService.getSession(userId)
 
+      // Check if the ticket is already sent
+      if (session.sentTickets && session.sentTickets.includes(ticketId)) {
+        logger.warn(`Ticket ${ticketId} for user ${userId} is already sent and cannot be canceled.`)
+        return
+      }
+
+      // Check if the ticket is already canceled
+      if (session.canceledTickets && session.canceledTickets.includes(ticketId)) {
+        logger.warn(`Ticket ${ticketId} for user ${userId} is already canceled.`)
+        return
+      }
+
       if (session.pendingTickets) {
         delete session.pendingTickets[ticketId]
         sessionService.updateSession(userId, session)
       }
 
+      // Mark the ticket as canceled
+      if (!session.canceledTickets) {
+        session.canceledTickets = []
+      }
+      session.canceledTickets.push(ticketId)
+      sessionService.updateSession(userId, session)
+
       await bot.sendMessage(chatId, messages.success.ticketCancelled)
       logger.info(logMessages.tickets.cancelled(userId, ticketId))
 
+      // Remove the confirmation keyboard after canceling
+      const lastMessageId = session.lastMessageId // Ensure the correct message ID is used
+      if (lastMessageId) {
+        await bot.editMessageReplyMarkup(
+          { reply_markup: { inline_keyboard: [] } },
+          { chat_id: chatId, message_id: lastMessageId }
+        )
+      } else {
+        logger.warn(`No message_id found for user ${userId} to remove inline keyboard.`)
+      }
     } catch (error) {
       logger.error(logMessages.tickets.cancelError(userId, ticketId), error)
-      await bot.sendMessage(chatId, messages.errors.generalError)
+      // Avoid sending a generic error message if the issue is with keyboard removal
+      if (error.code !== 'MESSAGE_ID_INVALID') {
+        await bot.sendMessage(chatId, messages.errors.generalError)
+      }
     }
   }
 
