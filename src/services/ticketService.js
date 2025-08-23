@@ -79,7 +79,9 @@ class TicketService {
       }
 
     } catch (error) {
-      logger.error('Ticket creation error:', error)
+      // Log concise error: prefer HTTP status, then error code, then message
+      const shortErr = error?.response?.status || error?.code || error?.message || 'unknown_error'
+      logger.error(`Ticket creation error: ${shortErr}`)
 
       if (this.mode === 'debug') {
         logger.warn('DEBUG MODE: Ticket creation failed, but continuing...')

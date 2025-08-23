@@ -234,9 +234,10 @@ class MessageHandler {
         }
 
       } else {
-        // Error - show error message but keep ticket pending
+        // Error - show concise error message and keep ticket pending
         await bot.sendMessage(chatId, creationResult.message)
-        logger.error(`Failed to create ticket for user ${userId}: ${creationResult.error}`)
+        const shortErr = creationResult.error || 'unknown_error'
+        logger.error(`Ticket creation failed for user ${userId}: ${shortErr}`)
 
         // In debug mode, still remove the ticket to avoid accumulation
         if (ticketService.getMode() === 'debug' && session.pendingTickets) {
