@@ -15,9 +15,10 @@ echo "Rotating logs for date: $TARGET_DATE"
 
 # Configuration for projects
 # Each entry: "<human-name>|<error-log-path>|<out-log-path>|<pm2-process-name>"
+# Use PM2 logs directory so rotation targets the running processes' logs
 projects=( \
   "Zammad-Assist|/root/.pm2/logs/Zammad-Assist-error.log|/root/.pm2/logs/Zammad-Assist-out.log|Zammad-Assist" \
-  "ai_dialog|/intelligence/ai_dialog/ai_dialog-error.log|/intelligence/ai_dialog/ai_dialog-out.log|ai-dialog" \
+  "ai-dialog|/root/.pm2/logs/ai-dialog-error.log|/root/.pm2/logs/ai-dialog-out.log|ai-dialog" \
 )
 
 for entry in "${projects[@]}"; do
