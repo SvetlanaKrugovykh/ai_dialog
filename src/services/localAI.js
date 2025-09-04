@@ -100,6 +100,7 @@ class LocalAIService {
 
       if (process.env.ENABLE_LOCAL_AI === 'true') {
         const _localAiStart = Date.now()
+        logger.info('DEBUG: Sending text to Local AI service:', text)
         const response = await axios.post(process.env.LOCAL_AI_URL, buildQwenRequest(text), { timeout: this.aiTimeout })
         const _localAiDuration = Date.now() - _localAiStart
         logger.info(`Local AI request duration for user ${clientId}: ${_localAiDuration} ms`)
