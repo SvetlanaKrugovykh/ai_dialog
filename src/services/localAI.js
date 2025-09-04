@@ -138,48 +138,17 @@ class LocalAIService {
       const ticket = ticketParser.parseTicket(textResult, topicResult, clientId)
       const formattedTicket = ticketParser.formatTicketForDisplay(ticket)
       logger.info(logMessages.processing.ticketParsing(clientId, text))
+      logger.info(logMessages.processing.textResult(clientId, formattedTicket))
 
-      return formattedTicket   //TEMPRORARYY RETURN
-
-      if (process.env.MODE === 'debug' || process.env.ENABLE_LOCAL_AI === 'false') {
-        console.log('DEBUG: Using only ticket parser result (LOCAL_AI disabled or debug mode)')
-        logger.info(logMessages.processing.textResult(clientId, formattedTicket))
-        return formattedTicket
-      }
-
-      const response = await axios.post(this.textProcessingUrl, {
-        text: text,
-        clientId: clientId,
-        timestamp: new Date().toISOString()
-      }, {
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        timeout: this.textTimeout
-      })
-
-      let processedResult
-      if (response.data && typeof response.data === 'object') {
-        if (response.data.ticket_id) {
-          processedResult = messages.ticket.created(response.data)
-        } else {
-          processedResult = response.data.result ||
-            response.data.processed_text ||
-            response.data.text ||
-            JSON.stringify(response.data, null, 2)
-        }
-      } else {
-        processedResult = response.data
-      }
-
-      logger.info(logMessages.processing.textResult(clientId, processedResult))
-
-      return processedResult
+      return formattedTicket
     } catch (error) {
       if (error.message && error.message.startsWith('VALIDATION_FAILED:')) {
         throw error
       }
       logger.warn(`External AI service failed, using ticket parser result: ${error.message}`)
+
+      const ticket = ticketParser.parseTicket(text, '', clientId)
+      const formattedTicket = ticketParser.formatTicketForDisplay(ticket)
       logger.info(logMessages.processing.textResult(clientId, formattedTicket))
       return formattedTicket
     }
