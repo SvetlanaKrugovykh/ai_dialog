@@ -99,7 +99,10 @@ class LocalAIService {
       let topicResult = ''
 
       if (process.env.ENABLE_LOCAL_AI === 'true') {
+        const _localAiStart = Date.now()
         const response = await axios.post(process.env.LOCAL_AI_URL, buildQwenRequest(text), { timeout: this.aiTimeout })
+        const _localAiDuration = Date.now() - _localAiStart
+        logger.info(`Local AI request duration for user ${clientId}: ${_localAiDuration} ms`)
         try {
           const parsed = JSON.parse(response.data.response)
           textResult = parsed.text || text
@@ -108,6 +111,7 @@ class LocalAIService {
           textResult = text
           topicResult = ''
         }
+        logger.info(`Local AI parsed results for user ${clientId}: topic="${topicResult}", text="${textResult}"`)
       }
 
       const validation = ticketParser.validateTicketContent(textResult)
