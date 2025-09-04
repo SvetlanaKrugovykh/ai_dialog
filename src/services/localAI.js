@@ -6,6 +6,7 @@ const messages = require('../../data/messages')
 const logMessages = require('../../data/logMessages')
 const serviceErrors = require('../../data/serviceErrors')
 const ticketParser = require('./ticketParser')
+const { log } = require('console')
 const buildQwenRequest = require('../../data/ai-requests').buildQwenRequest
 require('dotenv').config()
 
@@ -102,6 +103,7 @@ class LocalAIService {
         const _localAiStart = Date.now()
         const prompt_ = buildQwenRequest(text)
         logger.info('DEBUG: Sending prompt_ to Local AI service:', prompt_)
+        logger.info(`LOCAL_AI_URL: ${process.env.LOCAL_AI_URL}`)
         const response = await axios.post(process.env.LOCAL_AI_URL, prompt_, { timeout: this.aiTimeout })
         const _localAiDuration = Date.now() - _localAiStart
         logger.info(`Local AI request duration for user ${clientId}: ${_localAiDuration} ms`)
