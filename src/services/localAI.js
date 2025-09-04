@@ -6,7 +6,7 @@ const messages = require('../../data/messages')
 const logMessages = require('../../data/logMessages')
 const serviceErrors = require('../../data/serviceErrors')
 const ticketParser = require('./ticketParser')
-const { log } = require('console')
+const postAiCorrections = require('../../data/postAiCorrections')
 const buildQwenRequest = require('../../data/ai-requests').buildQwenRequest
 require('dotenv').config()
 
@@ -127,6 +127,14 @@ class LocalAIService {
         }
 
         logger.info(`Local AI parsed results for user ${clientId}: topic="${topicResult}", text="${textResult}"`)
+      }
+
+      const corrected = postAiCorrections.processResults(textResult, topicResult, text)
+      textResult = corrected.text
+      topicResult = corrected.topic
+
+      if (corrected.appliedRules.length > 0) {
+        logger.info(`Post-AI corrections for user ${clientId}: ${corrected.appliedRules.join(', ')}`)
       }
 
       const validation = ticketParser.validateTicketContent(textResult)
