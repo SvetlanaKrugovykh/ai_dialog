@@ -104,24 +104,28 @@ class LocalAIService {
         const prompt_ = buildQwenRequest(text)
         logger.info('DEBUG: Sending prompt_ to Local AI service:', prompt_)
         logger.info(`LOCAL_AI_URL: ${process.env.LOCAL_AI_URL}`)
-        const response = await axios.post(process.env.LOCAL_AI_URL, prompt_, {
-          timeout: this.aiTimeout,
-          headers: {
-            'Content-Type': 'application/json'
-          }
-        })
-        const _localAiDuration = Date.now() - _localAiStart
-        logger.info(`Local AI request duration for user ${clientId}: ${_localAiDuration} ms`)
-        logger.info(`DEBUG: Raw response.data.response: ${response.data.response}`)
+
         try {
+          const response = await axios.post(process.env.LOCAL_AI_URL, prompt_, {
+            timeout: this.aiTimeout,
+            headers: {
+              'Content-Type': 'application/json'
+            }
+          })
+          const _localAiDuration = Date.now() - _localAiStart
+          logger.info(`Local AI request duration for user ${clientId}: ${_localAiDuration} ms`)
+          logger.info(`DEBUG: Raw response.data.response: ${response.data.response}`)
+
           const parsed = JSON.parse(response.data.response)
           textResult = parsed.text || text
           topicResult = parsed['Тема'] || ''
         } catch (e) {
-          logger.error(`JSON parse error: ${e.message}`)
+          const _localAiDuration = Date.now() - _localAiStart
+          logger.warn(`Local AI failed for user ${clientId} after ${_localAiDuration}ms: ${e.message}`)
           textResult = text
           topicResult = ''
         }
+
         logger.info(`Local AI parsed results for user ${clientId}: topic="${topicResult}", text="${textResult}"`)
       }
 
