@@ -1280,20 +1280,14 @@ class MessageHandler {
         parse_mode: 'Markdown'
       })
 
-      // Reuse the existing session variable to avoid redeclaration
       if (!session.messages) {
         session.messages = {}
       }
 
-      // Save message_id keyed by ticketId so later operations (cancel/confirm)
-      // can remove the keyboard using the ticketId directly.
       session.messages[ticketId] = sentMessage.message_id
       sessionService.updateSession(userId, session)
 
       logger.info(`Message with keyboard sent. Saved message_id: ${sentMessage.message_id} for user ${userId}`)
-      logger.debug(`Updated session data for user ${userId}: ${JSON.stringify(session)}`)
-
-      // Additional debug log for session retrieval
       const updatedSession = sessionService.getSession(userId)
       logger.debug(`Retrieved session data after update for user ${userId}: ${JSON.stringify(updatedSession)}`)
     } catch (error) {
