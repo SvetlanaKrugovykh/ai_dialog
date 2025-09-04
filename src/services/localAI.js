@@ -100,15 +100,18 @@ class LocalAIService {
 
       if (process.env.ENABLE_LOCAL_AI === 'true') {
         const _localAiStart = Date.now()
-        logger.info('DEBUG: Sending text to Local AI service:', text)
-        const response = await axios.post(process.env.LOCAL_AI_URL, buildQwenRequest(text), { timeout: this.aiTimeout })
+        const prompt_ = buildQwenRequest(text)
+        logger.info('DEBUG: Sending prompt_ to Local AI service:', prompt_)
+        const response = await axios.post(process.env.LOCAL_AI_URL, prompt_, { timeout: this.aiTimeout })
         const _localAiDuration = Date.now() - _localAiStart
         logger.info(`Local AI request duration for user ${clientId}: ${_localAiDuration} ms`)
+        logger.info(`DEBUG: Raw response.data.response: ${response.data.response}`)
         try {
           const parsed = JSON.parse(response.data.response)
           textResult = parsed.text || text
           topicResult = parsed['Тема'] || ''
         } catch (e) {
+          logger.error(`JSON parse error: ${e.message}`)
           textResult = text
           topicResult = ''
         }
