@@ -99,7 +99,7 @@ class TicketParser {
     }
 
     const cleanText = text.trim().toLowerCase()
-    
+
     // Check minimum length
     if (cleanText.length < 5) {
       return { isValid: false, reason: 'Занадто коротке повідомлення (мінімум 5 символів)' }
@@ -142,7 +142,7 @@ class TicketParser {
     // Check for only interjections or filler words
     const fillerWords = ['хм', 'эм', 'ну', 'тобто', 'то есть', 'ага', 'угу', 'ок', 'ok', 'окей', 'okay']
     const words = cleanText.split(/\s+/).filter(word => word.length > 1)
-    
+
     if (words.length === 0) {
       return { isValid: false, reason: 'Повідомлення не містить змістовних слів' }
     }
@@ -174,7 +174,7 @@ class TicketParser {
    * @param {string} clientId - user ID
    * @returns {Object} - parsed ticket structure
    */
-  parseTicket(text, clientId) {
+  parseTicket(text, subject, clientId) {
     try {
       logger.info(logMessages.processing.ticketParsing(clientId, text))
 
@@ -183,7 +183,7 @@ class TicketParser {
         department: this.determineDepartment(text),
         category: 'Request', // Default category
         priority: this.determinePriority(text),
-        title: this.generateTitle(text),
+        title: this.generateTitle(text, subject),
         description: text.trim(),
         requester: clientId,
         language: this.detectLanguage(text),
@@ -279,23 +279,21 @@ class TicketParser {
    * @param {string} text - full text
    * @returns {string} - generated title
    */
-  generateTitle(text) {
-    // Take first meaningful part of the text as title
+  generateTitle(text, subject) {
     let title = text.trim()
+    if (subject.length > 6) {
+      title = subject.trim()
+      return title.charAt(0).toUpperCase() + title.slice(1)
+    }
 
-    // If text is too long, take first sentence or first 50 characters
     if (title.length > 50) {
-      // Try to find first sentence
       const sentenceEnd = title.search(/[.!?]\s/)
       if (sentenceEnd > 10 && sentenceEnd < 50) {
         title = title.substring(0, sentenceEnd + 1)
       } else {
-        // Take first 47 characters and add "..."
         title = title.substring(0, 47) + '...'
       }
     }
-
-    // Capitalize first letter
     return title.charAt(0).toUpperCase() + title.slice(1)
   }
 

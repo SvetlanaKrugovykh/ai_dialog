@@ -6,6 +6,7 @@ const messages = require('../../data/messages')
 const logMessages = require('../../data/logMessages')
 const serviceErrors = require('../../data/serviceErrors')
 const ticketParser = require('./ticketParser')
+const buildQwenRequest = require('../../data/ai-requests').buildQwenRequest
 require('dotenv').config()
 
 class LocalAIService {
@@ -14,6 +15,7 @@ class LocalAIService {
     this.textProcessingUrl = process.env.TEXT_PROCESSING_URL || 'http://localhost:8344/process/'
     this.speechTimeout = parseInt(process.env.SPEECH_TIMEOUT) || 60000 // 60 seconds
     this.textTimeout = parseInt(process.env.TEXT_TIMEOUT) || 30000 // 30 seconds
+    this.aiTimeout = parseInt(process.env.AI_TIMEOUT) || 180000 // 180 seconds
   }
 
   /**
@@ -93,27 +95,37 @@ class LocalAIService {
   async processText(text, clientId) {
     try {
       logger.info(logMessages.processing.textProcessing(clientId, text))
+      let textResult = text
+      let topicResult = ''
 
-      // VALIDATE ticket content BEFORE processing
-      const validation = ticketParser.validateTicketContent(text)
+      if (process.env.ENABLE_LOCAL_AI === 'true') {
+        const response = await axios.post(process.env.LOCAL_AI_URL, buildQwenRequest(text), { timeout: this.aiTimeout })
+        try {
+          const parsed = JSON.parse(response.data.response)
+          textResult = parsed.text || text
+          topicResult = parsed['Тема'] || ''
+        } catch (e) {
+          textResult = text
+          topicResult = ''
+        }
+      }
+
+      const validation = ticketParser.validateTicketContent(textResult)
       if (!validation.isValid) {
         logger.warn(`Ticket validation failed for user ${clientId}: ${validation.reason}`)
         throw new Error(`VALIDATION_FAILED: ${validation.reason}`)
       }
 
-      // ALWAYS process text through ticket parser first
-      const ticket = ticketParser.parseTicket(text, clientId)
+      const ticket = ticketParser.parseTicket(textResult, topicResult, clientId)
       const formattedTicket = ticketParser.formatTicketForDisplay(ticket)
       logger.info(logMessages.processing.ticketParsing(clientId, text))
-      
-      // If ENABLE_LOCAL_AI is false or in DEBUG mode, return only ticket parser result
+
       if (process.env.MODE === 'debug' || process.env.ENABLE_LOCAL_AI === 'false') {
         console.log('DEBUG: Using only ticket parser result (LOCAL_AI disabled or debug mode)')
         logger.info(logMessages.processing.textResult(clientId, formattedTicket))
         return formattedTicket
       }
 
-      // In production mode with ENABLE_LOCAL_AI=true, also try external AI service
       const response = await axios.post(this.textProcessingUrl, {
         text: text,
         clientId: clientId,
@@ -125,33 +137,27 @@ class LocalAIService {
         timeout: this.textTimeout
       })
 
-      // Handle ticket-based response format
       let processedResult
       if (response.data && typeof response.data === 'object') {
         if (response.data.ticket_id) {
-          // Format ticket information as readable text
           processedResult = messages.ticket.created(response.data)
         } else {
-          // Fallback for other object formats
-          processedResult = response.data.result || 
-            response.data.processed_text || 
+          processedResult = response.data.result ||
+            response.data.processed_text ||
             response.data.text ||
             JSON.stringify(response.data, null, 2)
         }
       } else {
         processedResult = response.data
       }
-      
+
       logger.info(logMessages.processing.textResult(clientId, processedResult))
 
       return processedResult
     } catch (error) {
-      // If this is a validation error, re-throw it (don't catch it here)
       if (error.message && error.message.startsWith('VALIDATION_FAILED:')) {
         throw error
       }
-      
-      // If external AI service fails, fallback to ticket parser result
       logger.warn(`External AI service failed, using ticket parser result: ${error.message}`)
       logger.info(logMessages.processing.textResult(clientId, formattedTicket))
       return formattedTicket
