@@ -118,7 +118,7 @@ class LocalAIService {
 
           const parsed = JSON.parse(response.data.response)
           textResult = parsed.text || text
-          topicResult = parsed['Тема'] || ''
+          topicResult = parsed.topic || ''
         } catch (e) {
           const _localAiDuration = Date.now() - _localAiStart
           logger.warn(`Local AI failed for user ${clientId} after ${_localAiDuration}ms: ${e.message}`)
@@ -138,6 +138,8 @@ class LocalAIService {
       const ticket = ticketParser.parseTicket(textResult, topicResult, clientId)
       const formattedTicket = ticketParser.formatTicketForDisplay(ticket)
       logger.info(logMessages.processing.ticketParsing(clientId, text))
+
+      return formattedTicket   //TEMPRORARYY RETURN
 
       if (process.env.MODE === 'debug' || process.env.ENABLE_LOCAL_AI === 'false') {
         console.log('DEBUG: Using only ticket parser result (LOCAL_AI disabled or debug mode)')
