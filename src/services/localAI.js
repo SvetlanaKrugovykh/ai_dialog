@@ -129,9 +129,9 @@ class LocalAIService {
         logger.info(`Local AI parsed results for user ${clientId}: topic="${topicResult}", text="${textResult}"`)
       }
 
-      // const corrected = postAiCorrections.processResults(textResult, topicResult, text)
-      // textResult = corrected.text
-      // topicResult = corrected.topic
+      const corrected = postAiCorrections.processResults(textResult, topicResult, text)
+      textResult = corrected.text
+      topicResult = corrected.topic
 
       if (corrected.appliedRules.length > 0) {
         logger.info(`Post-AI corrections for user ${clientId}: ${corrected.appliedRules.join(', ')}`)
