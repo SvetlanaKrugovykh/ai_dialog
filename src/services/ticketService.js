@@ -67,13 +67,41 @@ class TicketService {
       const result = response.data
 
       if (result.success && result?.ticket?.id) {
-        logger.info(`Ticket created successfully: ID ${result.ticket.id} for user ${telegramId}`)
-        return {
-          success: true,
-          ticketId: result.ticket.id,
-          // ticketUrl: result.ticket.url || `${this.createTicketEndpoint}/#ticket/zoom/${result.ticket.id}`,
-          message: messages.tickets.created(result.ticket.id, result.ticket.url)
+        // Check for special status responses
+        if (result.ticket.id === 'already_registered') {
+          logger.info(`Duplicate ticket detected for user ${telegramId}`)
+          return {
+            success: true,
+            isDuplicate: true,
+            ticketId: result.ticket.existing_id || 'unknown',
+            message: messages.tickets.alreadyRegistered
+          }
         }
+        
+        if (result.ticket.id === 'insufficient_info') {
+          logger.info(`Insufficient information in ticket for user ${telegramId}`)
+          return {
+            success: false,
+            isInsufficientInfo: true,
+            message: messages.tickets.insufficientInfo
+          }
+        }
+
+        // Normal case - numeric ID
+        if (typeof result.ticket.id === 'number' || /^\d+$/.test(result.ticket.id)) {
+          logger.info(`Ticket created successfully: ID ${result.ticket.id} for user ${telegramId}`)
+          return {
+            success: true,
+            ticketId: result.ticket.id,
+            // ticketUrl: result.ticket.url || `${this.createTicketEndpoint}/#ticket/zoom/${result.ticket.id}`,
+            message: messages.tickets.created(result.ticket.id, result.ticket.url)
+          }
+        }
+        
+        // Unknown status
+        logger.warn(`Unknown ticket status: ${result.ticket.id} for user ${telegramId}`)
+        throw new Error(`Unknown response status: ${result.ticket.id}`)
+        
       } else {
         throw new Error('Invalid response format from ticket creation API')
       }
