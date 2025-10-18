@@ -77,7 +77,7 @@ class TicketService {
             message: messages.tickets.alreadyRegistered
           }
         }
-        
+
         if (result.ticket.id === 'insufficient_info') {
           logger.info(`Insufficient information in ticket for user ${telegramId}`)
           return {
@@ -97,11 +97,11 @@ class TicketService {
             message: messages.tickets.created(result.ticket.id, result.ticket.url)
           }
         }
-        
+
         // Unknown status
         logger.warn(`Unknown ticket status: ${result.ticket.id} for user ${telegramId}`)
         throw new Error(`Unknown response status: ${result.ticket.id}`)
-        
+
       } else {
         throw new Error('Invalid response format from ticket creation API')
       }
