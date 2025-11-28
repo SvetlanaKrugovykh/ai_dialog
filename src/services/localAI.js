@@ -10,6 +10,18 @@ const postAiCorrections = require('../../data/postAiCorrections')
 const buildQwenRequest = require('../../data/ai-requests').buildQwenRequest
 require('dotenv').config()
 
+function deduplicateSentences(text) {
+  const sentences = text.split(/(?<=[.!?])\s+/)
+  const seen = new Set()
+  return sentences.filter(s => {
+    const trimmed = s.trim()
+    if (!trimmed) return false
+    if (seen.has(trimmed)) return false
+    seen.add(trimmed)
+    return true
+  }).join(' ')
+}
+
 class LocalAIService {
   constructor() {
     this.speechToTextUrl = process.env.SPEECH_TO_TEXT_URL || 'http://localhost:8338/update/'
@@ -56,8 +68,10 @@ class LocalAIService {
             parsedData.result ||
             parsedData.transcript ||
             response.data
+          transcribedText = deduplicateSentences(transcribedText)
         } catch (parseError) {
           transcribedText = response.data
+          transcribedText = deduplicateSentences(transcribedText)
         }
       } else if (response.data && typeof response.data === 'object') {
         transcribedText = response.data.translated_text ||
@@ -238,8 +252,10 @@ class LocalAIService {
             parsedData.result ||
             parsedData.transcript ||
             response.data
+          transcribedText = deduplicateSentences(transcribedText)
         } catch (parseError) {
           transcribedText = response.data
+          transcribedText = deduplicateSentences(transcribedText)
         }
       } else if (response.data && typeof response.data === 'object') {
         transcribedText = response.data.translated_text ||
@@ -248,8 +264,10 @@ class LocalAIService {
           response.data.result ||
           response.data.transcript ||
           JSON.stringify(response.data)
+        transcribedText = deduplicateSentences(transcribedText)
       } else {
         transcribedText = String(response.data)
+        transcribedText = deduplicateSentences(transcribedText)
       }
 
       logger.info(logMessages.processing.speechResult(clientId, transcribedText))
